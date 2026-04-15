@@ -1,3 +1,5 @@
+import org.gradle.kotlin.dsl.implementation
+
 plugins {
 	kotlin("jvm") version "2.2.21"
 	kotlin("plugin.spring") version "2.2.21"
@@ -20,7 +22,16 @@ repositories {
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter")
+	implementation ("org.springframework.boot:spring-boot-starter-json")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
+	implementation ("org.springframework.boot:spring-boot-starter-webflux")
+
+//	runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-aarch_64")
+//	runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-x86_64")
+
+	/* logging */
+	implementation("io.github.microutils:kotlin-logging-jvm:2.0.11")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
