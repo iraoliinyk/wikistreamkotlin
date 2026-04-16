@@ -1,0 +1,11 @@
+services:
+  wikistreamkotlin:
+    container_name: wikistreamkotlin
+    image: wikistreamkotlin:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7000:7000"
+    restart: unless-stopped
+
