@@ -7,7 +7,11 @@ import org.springframework.stereotype.Service
 
 @Service
 class StatsService(val statsRepository: StatsRepository) {
-    fun record(event: WikiEvent) = statsRepository.record(event)
-
-    fun getSnapshot(): StatsSnapshot = statsRepository.snapshot()
+    fun record(event: WikiEvent) {
+        println("🚀 StatsService record: $event")
+        statsRepository.record(event)
+    }
+    fun getSnapshot(): StatsSnapshot  {
+       return statsRepository.snapshot()
+    }
 }

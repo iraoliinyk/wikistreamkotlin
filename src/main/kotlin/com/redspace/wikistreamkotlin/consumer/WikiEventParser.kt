@@ -1,16 +1,20 @@
 package com.redspace.wikistreamkotlin.consumer
 
 import com.redspace.wikistreamkotlin.domain.WikiEvent
-import com.redspace.wikistreamkotlin.service.StatsService
-import org.springframework.boot.context.event.ApplicationReadyEvent
-import org.springframework.context.event.EventListener
-import org.springframework.http.HttpHeaders
-import org.springframework.http.MediaType
-import org.springframework.stereotype.Component
-import org.springframework.web.reactive.function.client.WebClient
+import tools.jackson.databind.ObjectMapper
 
-class WikiEventParser {
-    fun parseEvent(event: String): WikiEvent? {
-        return null
+
+object WikiEventParser {
+    fun parseEvent(sseLine: String, objectMapper: ObjectMapper): WikiEvent? {
+        return try {
+            // 1. Remove the "data: " prefix
+            val jsonPayload = sseLine.removePrefix("data:").trim()
+            // 2. Parse JSON into Data Class
+            objectMapper.readValue(jsonPayload, WikiEvent::class.java)
+        } catch (e: Exception) {
+//            TBD error-handling
+            println("Failed to parse event: ${e.message}")
+            null
+        }
     }
 }

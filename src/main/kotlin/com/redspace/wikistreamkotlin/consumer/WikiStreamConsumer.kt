@@ -9,31 +9,28 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
+import tools.jackson.databind.ObjectMapper
 
 @Component
 class WikiStreamConsumer(
     val statsService: StatsService,
-   val webClient: WebClient
+    val webClient: WebClient,
+    val objectMapper: ObjectMapper
 ) {
 
     companion object {
         const val WIKI_URL = "https://stream.wikimedia.org/v2/stream/recentchange"
     }
 
-//    @EventListener(ApplicationReadyEvent::class)
+    @EventListener(ApplicationReadyEvent::class)
     fun start() {
         webClient.get()
             .uri(WIKI_URL)
             .accept(MediaType.APPLICATION_JSON)
             .header(HttpHeaders.USER_AGENT, "wiki-stream-consumer/1.0 (https://github.com/you/wiki-stream)")
             .retrieve()
-            .bodyToFlux(String::class.java)   // replaces bufio.Scanner
-            .filter { it.startsWith("data:") } // replaces HasPrefix check
-            .mapNotNull { parseEvent(it) }
+            .bodyToFlux(String::class.java)
+            .mapNotNull { WikiEventParser.parseEvent(it, objectMapper) }
             .subscribe { statsService.record(it) }
-    }
-
-    private fun parseEvent(event: String): WikiEvent {
-        return WikiEventMockFactory.createWikiEvent()
     }
 }
