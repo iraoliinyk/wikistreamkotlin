@@ -6,12 +6,12 @@ import com.redspace.wikistreamkotlin.repository.StatsRepository
 import org.springframework.stereotype.Service
 
 @Service
-class StatsService(val statsRepository: StatsRepository) {
-    fun record(event: WikiEvent) {
-        println("🚀 StatsService record: $event")
+class StatsService(private val statsRepository: StatsRepository) {
+    suspend fun record(event: WikiEvent) {
         statsRepository.record(event)
     }
-    fun getSnapshot(): StatsSnapshot  {
-       return statsRepository.snapshot()
+
+    suspend fun getSnapshot(): StatsSnapshot {
+        return statsRepository.snapshot()
     }
 }

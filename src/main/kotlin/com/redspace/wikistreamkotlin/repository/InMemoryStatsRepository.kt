@@ -2,11 +2,10 @@ package com.redspace.wikistreamkotlin.repository
 
 import com.redspace.wikistreamkotlin.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.domain.WikiEvent
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import mu.KLogging
 import org.springframework.stereotype.Repository
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.ConcurrentHashMap
-import java.util.Collections
 
 @Repository
 class InMemoryStatsRepository : StatsRepository {
@@ -15,29 +14,39 @@ class InMemoryStatsRepository : StatsRepository {
         private const val SNAPSHOT_ID_PREFIX = "snapshot-"
     }
 
-    private val totalMessages = AtomicInteger(0)
-    private val botCount = AtomicInteger(0)
-    private val nonBotCount = AtomicInteger(0)
-    private val distinctUsers: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap())
-    private val serverUrlCounts = ConcurrentHashMap<String, AtomicInteger>()
+    private val lock = Mutex()
+    private var totalMessages: Int = 0
+    private var botCount: Int = 0
+    private var nonBotCount: Int = 0
+    private val distinctUsers = mutableSetOf<String>()
+    private val serverUrlCounts = mutableMapOf<String, Int>()
 
-    override fun record(event: WikiEvent) {
-        logger.info("InMemoryStatsRepository record: $event")
-        totalMessages.incrementAndGet()
-        event.user?.let { distinctUsers.add(it) }
-        if (event.bot == true) botCount.incrementAndGet() else nonBotCount.incrementAndGet()
-        event.serverUrl?.let { serverUrlCounts.getOrPut(it) { AtomicInteger(0) }.incrementAndGet() }
+    override suspend fun record(event: WikiEvent) {
+        lock.withLock {
+            totalMessages += 1
+            event.user?.let { distinctUsers.add(it) }
+            if (event.bot == true) {
+                botCount += 1
+            } else {
+                nonBotCount += 1
+            }
+            event.serverUrl?.let { serverUrl ->
+                serverUrlCounts[serverUrl] = (serverUrlCounts[serverUrl] ?: 0) + 1
+            }
+        }
     }
 
-    override fun snapshot(): StatsSnapshot {
-        return StatsSnapshot(
-            id = "$SNAPSHOT_ID_PREFIX${System.currentTimeMillis()}",
-            totalMessages = totalMessages.get(),
-            distinctUsers = distinctUsers.size,
-            botCount = botCount.get(),
-            nonBotCount = nonBotCount.get(),
-            countByServerUrl = serverUrlCounts.mapValues { it.value.get() }
-        )
+    override suspend fun snapshot(): StatsSnapshot {
+        return lock.withLock {
+            StatsSnapshot(
+                id = "$SNAPSHOT_ID_PREFIX${System.currentTimeMillis()}",
+                totalMessages = totalMessages,
+                distinctUsers = distinctUsers.size,
+                botCount = botCount,
+                nonBotCount = nonBotCount,
+                countByServerUrl = serverUrlCounts.toMap()
+            )
+        }
     }
 
 }

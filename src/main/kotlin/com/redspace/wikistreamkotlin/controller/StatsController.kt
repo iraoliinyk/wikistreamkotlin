@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/v1/")
 class StatsController(private val statsService: StatsService) {
     @GetMapping("/stats")
-    fun getStats(): StatsSnapshot = statsService.getSnapshot()
+    suspend fun getStats(): StatsSnapshot = statsService.getSnapshot()
 
     @GetMapping("/status")
     fun getStatus() = mapOf("status" to "ok")

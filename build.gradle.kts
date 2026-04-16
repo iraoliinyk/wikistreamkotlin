@@ -25,18 +25,10 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-json")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 
-	runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.1.110.Final:osx-x86_64")
-	runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.1.110.Final:osx-aarch_64")
-//    regular throws an error:
-//    i.n.r.d.DnsServerAddressStreamProviders  :
-//    Unable to load io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider,
-//    fallback to system defaults. This may result in incorrect DNS resolutions on MacOS.
-//    Check whether you have a dependency on 'io.netty:netty-resolver-dns-native-macos'.
-//    Use DEBUG level to see the full stack: java.lang.UnsatisfiedLinkError:
-//    failed to load the required native library
-//    runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-aarch_64")
-//    runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-x86_64")
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.2.12.Final:osx-x86_64")
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.2.12.Final:osx-aarch_64")
 
     /* logging */
     implementation("io.github.microutils:kotlin-logging-jvm:2.0.11")
