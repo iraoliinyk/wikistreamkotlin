@@ -1,14 +1,17 @@
 package com.redspace.wikistreamkotlin.consumer
 
+import com.redspace.wikistreamkotlin.exception.AppError
+import com.redspace.wikistreamkotlin.exception.AppErrorLogger
+import com.redspace.wikistreamkotlin.exception.UnexpectedAppError
 import com.redspace.wikistreamkotlin.service.StatsService
 import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import mu.KLogging
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -19,7 +22,8 @@ import kotlin.time.Duration.Companion.milliseconds
 @Component
 class WikiStreamConsumer(
     private val statsService: StatsService,
-    private val wikiStreamClient: WikiStreamClient
+    private val wikiStreamClient: WikiStreamClient,
+    private val appErrorLogger: AppErrorLogger
 ) {
 
     companion object : KLogging() {
@@ -37,7 +41,21 @@ class WikiStreamConsumer(
 
         consumerJob = consumerScope.launch {
             while (true) {
-                runConsumerLoop()
+                try {
+                    runConsumerLoop()
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (error: AppError) {
+                    appErrorLogger.log(error, context = mapOf("component" to "WikiStreamConsumer"))
+                } catch (exception: Exception) {
+                    appErrorLogger.log(
+                        UnexpectedAppError(
+                            message = "Unexpected error while consuming Wikimedia stream",
+                            cause = exception
+                        ),
+                        context = mapOf("component" to "WikiStreamConsumer")
+                    )
+                }
                 delay(RETRY_DELAY_MS.milliseconds)
             }
         }
@@ -45,13 +63,11 @@ class WikiStreamConsumer(
 
     private suspend fun runConsumerLoop() {
         wikiStreamClient.streamEvents()
-            .catch { error ->
-                logger.warn(error) { "Wikipedia stream disconnected; reconnecting" }
-            }
             .collect { event ->
                 statsService.record(event)
             }
     }
+
 
     @PreDestroy
     fun stop() {

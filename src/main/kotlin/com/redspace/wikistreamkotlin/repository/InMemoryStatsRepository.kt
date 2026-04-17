@@ -2,15 +2,17 @@ package com.redspace.wikistreamkotlin.repository
 
 import com.redspace.wikistreamkotlin.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.domain.WikiEvent
+import com.redspace.wikistreamkotlin.exception.RepositoryReadError
+import com.redspace.wikistreamkotlin.exception.RepositoryWriteError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import mu.KLogging
 import org.springframework.stereotype.Repository
 
 @Repository
 class InMemoryStatsRepository : StatsRepository {
 
-    companion object : KLogging() {
+    companion object {
         private const val SNAPSHOT_ID_PREFIX = "snapshot-"
     }
 
@@ -22,29 +24,47 @@ class InMemoryStatsRepository : StatsRepository {
     private val serverUrlCounts = mutableMapOf<String, Int>()
 
     override suspend fun record(event: WikiEvent) {
-        lock.withLock {
-            totalMessages += 1
-            event.user?.let { distinctUsers.add(it) }
-            if (event.bot == true) {
-                botCount += 1
-            } else {
-                nonBotCount += 1
+        try {
+            lock.withLock {
+                totalMessages += 1
+                event.user?.let { distinctUsers.add(it) }
+                if (event.bot == true) {
+                    botCount += 1
+                } else {
+                    nonBotCount += 1
+                }
+                event.serverUrl?.let { serverUrl ->
+                    serverUrlCounts[serverUrl] = (serverUrlCounts[serverUrl] ?: 0) + 1
+                }
             }
-            event.serverUrl?.let { serverUrl ->
-                serverUrlCounts[serverUrl] = (serverUrlCounts[serverUrl] ?: 0) + 1
-            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            throw RepositoryWriteError(
+                message = "Failed to record wiki event in memory",
+                cause = exception
+            )
         }
     }
 
     override suspend fun snapshot(): StatsSnapshot {
-        return lock.withLock {
-            StatsSnapshot(
-                id = "$SNAPSHOT_ID_PREFIX${System.currentTimeMillis()}",
-                totalMessages = totalMessages,
-                distinctUsers = distinctUsers.size,
-                botCount = botCount,
-                nonBotCount = nonBotCount,
-                countByServerUrl = serverUrlCounts.toMap()
+        try {
+            return lock.withLock {
+                StatsSnapshot(
+                    id = "$SNAPSHOT_ID_PREFIX${System.currentTimeMillis()}",
+                    totalMessages = totalMessages,
+                    distinctUsers = distinctUsers.size,
+                    botCount = botCount,
+                    nonBotCount = nonBotCount,
+                    countByServerUrl = serverUrlCounts.toMap()
+                )
+            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            throw RepositoryReadError(
+                message = "Failed to build stats snapshot from in-memory state",
+                cause = exception
             )
         }
     }

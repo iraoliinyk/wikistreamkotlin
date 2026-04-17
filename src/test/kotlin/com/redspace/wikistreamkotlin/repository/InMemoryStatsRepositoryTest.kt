@@ -1,6 +1,5 @@
 package com.redspace.wikistreamkotlin.repository
 
-import com.redspace.wikistreamkotlin.consumer.WikiEventMockFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll

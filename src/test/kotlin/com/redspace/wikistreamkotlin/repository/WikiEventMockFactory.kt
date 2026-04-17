@@ -1,9 +1,9 @@
-package com.redspace.wikistreamkotlin.consumer
+package com.redspace.wikistreamkotlin.repository
 
 import com.redspace.wikistreamkotlin.domain.WikiEvent
 import com.redspace.wikistreamkotlin.domain.WikiEventMeta
-import java.util.UUID
 import java.time.Instant
+import java.util.UUID
 
 object WikiEventMockFactory {
 
