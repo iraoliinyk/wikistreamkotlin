@@ -1,19 +1,66 @@
+# About
+Spring Boot + Kotlin app that consumes the [wiki-recentchange stream](https://stream.wikimedia.org/v2/stream/recentchange).
+
+Events are stored in local memory and can be retrieved via GET request.
+
 # Read Me First
-The following was discovered as part of building this project:
+This project requires Java 24, Kotlin and IntelliJ IDEA to run locally
 
-* The JVM level was changed from '25' to '24' as the Kotlin version does not support Java 25 yet.
+## Implemented requests
+### 1. GET /stats returns recent changes statistics, including:
+* number of messages consumed
+* number of distinct users
+* number of bots and number of non-bots
+* count by distinct server URLs
 
-# Getting Started
+### 2. GET /status health check
 
-### Reference Documentation
-For further reference, please consider the following sections:
+## Run with Docker
+Build the application image:
 
-* [Official Gradle documentation](https://docs.gradle.org)
-* [Spring Boot Gradle Plugin Reference Guide](https://docs.spring.io/spring-boot/4.0.5/gradle-plugin)
-* [Create an OCI image](https://docs.spring.io/spring-boot/4.0.5/gradle-plugin/packaging-oci-image.html)
+```bash
+docker build -t wikistreamkotlin:latest .
+```
 
-### Additional Links
-These additional references should also help you:
+Run the container and publish app port 7000:
 
-* [Gradle Build Scans – insights for your project's build](https://scans.gradle.com#gradle)
+```bash
+docker run --rm -p 7000:7000 --name wikistreamkotlin wikistreamkotlin:latest
+```
 
+Verify status endpoint:
+
+```bash
+curl http://localhost:7000/v1/status
+```
+
+## Run with Docker Compose
+Start the app (builds the image if needed):
+
+```bash
+docker compose up --build
+```
+
+Run in detached mode:
+
+```bash
+docker compose up --build -d
+```
+
+Stop and remove containers:
+
+```bash
+docker compose down
+```
+
+Fetch recent changes:
+
+```bash
+curl http://localhost:7000/v1/stats
+```
+
+Verify status endpoint:
+
+```bash
+curl http://localhost:7000/v1/status
+```
