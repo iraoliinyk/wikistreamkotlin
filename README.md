@@ -7,15 +7,17 @@ Events are stored in local memory and can be retrieved via GET request.
 This project requires Java 24, Kotlin and IntelliJ IDEA to run locally
 
 ## Implemented requests
-### 1. GET /stats returns recent changes statistics, including:
+### 1. GET  /v1/stats returns recent changes statistics, including:
 * number of messages consumed
 * number of distinct users
 * number of bots and number of non-bots
 * count by distinct server URLs
 
-### 2. GET /status health check
+### 2. GET  /v1/status health check
 
 ## Run with Docker
+The Docker build uses the Gradle wrapper files committed in `gradle/wrapper/` together with `gradlew`.
+
 Build the application image:
 
 ```bash

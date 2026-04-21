@@ -13,7 +13,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import mu.KLogging
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
@@ -26,7 +25,7 @@ class WikiStreamConsumer(
     private val appErrorLogger: AppErrorLogger
 ) {
 
-    companion object : KLogging() {
+    companion object  {
         private const val RETRY_DELAY_MS = 3_000L
     }
 

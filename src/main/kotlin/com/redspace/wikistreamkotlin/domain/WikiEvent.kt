@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 data class WikiEvent(
     val schema: String?,
     val meta: WikiEventMeta?,
-    val id: Long,
+    val id: Long?,
     val type: String?,
     val namespace: Int?,
     val title: String?,

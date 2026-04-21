@@ -4,7 +4,8 @@ FROM eclipse-temurin:24-jdk AS builder
 WORKDIR /workspace
 
 COPY gradlew gradlew
-COPY gradle gradle
+COPY gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.jar
+COPY gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.properties
 COPY build.gradle.kts settings.gradle.kts ./
 COPY src src
 
@@ -22,6 +23,6 @@ USER spring
 
 COPY --from=builder /workspace/app.jar app.jar
 
-EXPOSE 8080
+EXPOSE 7000
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
