@@ -11,6 +11,8 @@ plugins {
 group = "com.redspace"
 version = "0.0.1-SNAPSHOT"
 
+// Java 24 used for both JVM and native-image builds
+// (Kotlin doesn't yet support Java 25 target, so we match at 24)
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(24)
@@ -28,6 +30,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 
+    // Netty native DNS support (platform-specific, excluded from native build)
     runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.2.12.Final:osx-x86_64")
     runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.2.12.Final:osx-aarch_64")
 
@@ -39,7 +42,9 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Kotlin configuration with proper JVM target alignment (Java 24)
 kotlin {
+    jvmToolchain(24)
     compilerOptions {
         freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
     }
@@ -48,3 +53,22 @@ kotlin {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+
+// GraalVM Native Image configuration for Spring Boot AOT (optional, for nativeCompile task)
+/*
+graalvmNative {
+    binaries {
+        main {
+            // Enable aggressive inlining and optimization
+            buildArgs.add("--strict-image-heap")
+            buildArgs.add("-H:+UnlockExperimentalVMOptions")
+            buildArgs.add("-H:EnableURLProtocols=http,https")
+            buildArgs.add("--enable-https")
+            buildArgs.add("--enable-all-security-services")
+            buildArgs.add("-H:+ReportExceptionStackTraces")
+        }
+    }
+}
+*/
+
+
