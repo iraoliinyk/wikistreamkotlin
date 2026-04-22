@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1
+# Production-ready Scratch-based Docker build using GraalVM Native Image
+# Target: ~100-150 MB image with <100 ms startup
+# Build time: ~5-10 minutes
+#
+# Prerequisites:
+#   1. Spring Boot 3.0+ (already using 4.0.5)
+#   2. org.graalvm.buildtools gradle plugin
+#   3. GraalVM 24 with native-image component
+
+# Stage 1: Builder with GraalVM
+FROM ghcr.io/graalvm/native-image-community:24-muslib AS builder
+WORKDIR /workspace
+
+# Copy build configuration
+COPY gradlew gradlew
+COPY gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.jar
+COPY gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.properties
+COPY build.gradle.kts settings.gradle.kts ./
+COPY src src
+
+# Build with native-image plugin (if configured in build.gradle.kts)
+# Otherwise, use the fallback approach below
+RUN chmod +x ./gradlew && \
+    ./gradlew --no-daemon clean bootJar
+
+# Extract and prepare for native image generation
+RUN mkdir -p /workspace/extracted && \
+    cd /workspace/extracted && \
+    JAR_PATH=$(find /workspace/build/libs -maxdepth 1 -type f -name "*-SNAPSHOT.jar" ! -name "*-plain.jar" | head -n 1) && \
+    test -n "$JAR_PATH" && \
+    jar xf "$JAR_PATH" && \
+    ls -la && \
+    echo "=== JAR extracted successfully ===" || \
+    (echo "JAR extraction failed"; exit 1)
+
+# Build native executable
+# This compiles Spring Boot + Kotlin + all dependencies into a single binary
+RUN cd /workspace && \
+    native-image \
+      --static \
+      --libc=musl \
+      --strict-image-heap \
+      -H:Name=app \
+      -H:Class=org.springframework.boot.loader.JarLauncher \
+      -H:+ReportExceptionStackTraces \
+      -H:+UnlockExperimentalVMOptions \
+      -H:EnableURLProtocols=http,https \
+      --enable-https \
+      --no-fallback \
+      -cp /workspace/extracted:/workspace/extracted/lib/* \
+      app \
+    || (echo "WARNING: Native image build with static linking failed, trying dynamic build..." && \
+        native-image \
+          -H:Name=app \
+          -H:Class=org.springframework.boot.loader.JarLauncher \
+          -H:+ReportExceptionStackTraces \
+          --enable-https \
+          --no-fallback \
+          -cp /workspace/extracted:/workspace/extracted/lib/* \
+          app && \
+        echo "Dynamic native image built successfully (not suitable for scratch)")
+
+# Stage 2: Runtime - Minimal scratch image
+# Scratch is completely empty - only contains what we copy
+FROM scratch
+
+WORKDIR /app
+
+# Copy timezone data (optional, but recommended)
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy the native executable
+COPY --from=builder /workspace/app /app/app
+
+# Expose application port
+EXPOSE 7000
+
+# Runtime environment variable
+ENV PORT=7000
+
+# Run the native application directly (no JVM needed)
+# The executable is a Linux ELF binary compiled from Java bytecode
+ENTRYPOINT ["/app/app"]
+

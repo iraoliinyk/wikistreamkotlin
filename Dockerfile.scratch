@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# Scratch-based Docker build using GraalVM Native Image.
+# Final image is scratch; required shared libs are copied from builder.
+
+FROM ghcr.io/graalvm/native-image-community:24 AS builder
+WORKDIR /workspace
+
+# Copy Gradle wrapper and config
+COPY gradlew gradlew
+COPY gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.jar
+COPY gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.properties
+COPY build.gradle.kts settings.gradle.kts ./
+COPY src src
+
+RUN chmod +x ./gradlew
+RUN ./gradlew --no-daemon clean nativeCompile
+
+# Copy the native executable and all runtime shared libraries into a rootfs folder.
+RUN BIN_PATH=$(find /workspace/build/native/nativeCompile -maxdepth 1 -type f -perm -111 | head -n 1) && \
+    test -n "$BIN_PATH" && \
+    mkdir -p /workspace/rootfs/app /workspace/rootfs/etc/ssl/certs && \
+    cp "$BIN_PATH" /workspace/rootfs/app/app && \
+    ldd "$BIN_PATH" | awk '{for(i=1;i<=NF;i++) if ($i ~ /^\//) print $i}' | sort -u | \
+      xargs -I '{}' cp --parents '{}' /workspace/rootfs && \
+    cp /etc/ssl/certs/ca-bundle.crt /workspace/rootfs/etc/ssl/certs/ca-bundle.crt
+
+# Final scratch stage - contains ONLY the native executable
+FROM scratch
+
+WORKDIR /app
+
+# Copy native executable and required runtime files
+COPY --from=builder /workspace/rootfs/ /
+
+# Expose port
+EXPOSE 7000
+
+# Set environment
+ENV PORT=7000
+
+# Run the native application
+ENTRYPOINT ["/app/app"]
+
