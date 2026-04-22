@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-@RequestMapping("/v1/")
+@RequestMapping("/v1")
 class StatsController(private val statsService: StatsService) {
     @GetMapping("/stats")
     suspend fun getStats(): StatsSnapshot = statsService.getSnapshot()
