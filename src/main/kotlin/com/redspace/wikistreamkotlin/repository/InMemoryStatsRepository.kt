@@ -7,9 +7,11 @@ import com.redspace.wikistreamkotlin.exception.RepositoryWriteError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Repository
 
 @Repository
+@ConditionalOnProperty(name = ["app.stats.repository.type"], havingValue = "in-memory")
 class InMemoryStatsRepository : StatsRepository {
 
     companion object {
