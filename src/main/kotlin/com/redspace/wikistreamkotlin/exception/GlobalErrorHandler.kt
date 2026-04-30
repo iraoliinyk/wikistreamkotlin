@@ -3,8 +3,10 @@ package com.redspace.wikistreamkotlin.exception
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.server.reactive.ServerHttpRequest
+import org.springframework.web.bind.support.WebExchangeBindException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.server.ServerWebInputException
 import java.time.Instant
 
 @RestControllerAdvice
@@ -28,6 +30,19 @@ class GlobalErrorHandler(
     ): ProblemDetail {
         val error = UnexpectedAppError(
             message = "Unexpected error while processing request",
+            cause = exception
+        )
+        appErrorLogger.log(error, context = mapOf("path" to request.path.value()))
+        return error.toProblemDetail(request)
+    }
+
+    @ExceptionHandler(WebExchangeBindException::class, ServerWebInputException::class)
+    fun handleBadRequest(
+        exception: Exception,
+        request: ServerHttpRequest
+    ): ProblemDetail {
+        val error = AuthValidationError(
+            message = "Invalid request payload",
             cause = exception
         )
         appErrorLogger.log(error, context = mapOf("path" to request.path.value()))

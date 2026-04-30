@@ -1,10 +1,48 @@
 services:
+  cassandra:
+    container_name: wikistreamkotlin-cassandra
+    image: cassandra:5.0
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: wikistream-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+    restart: unless-stopped
+
+  cassandra-init:
+    container_name: wikistreamkotlin-cassandra-init
+    image: cassandra:5.0
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./src/main/resources/db/cassandra/schema.cql:/schema.cql:ro
+    entrypoint: ["/bin/sh", "-c", "cqlsh cassandra 9042 -f /schema.cql"]
+    restart: "no"
+
   wikistreamkotlin:
     container_name: wikistreamkotlin
     image: wikistreamkotlin:latest
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      cassandra-init:
+        condition: service_completed_successfully
+    environment:
+      APP_STATS_REPOSITORY_TYPE: cassandra
+      CASSANDRA_CONTACT_POINTS: cassandra
+      CASSANDRA_PORT: 9042
+      CASSANDRA_KEYSPACE_NAME: wikistream
+      CASSANDRA_LOCAL_DATACENTER: us-east-2
+
     ports:
       - "7000:7000"
     restart: unless-stopped

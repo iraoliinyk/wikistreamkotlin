@@ -39,3 +39,9 @@ out/
 
 ### Kotlin ###
 .kotlin
+
+### Cassandra / Astra secrets ###
+/config/cassandra-secrets.properties
+/config/*.zip
+/config/auth-secrets.properties
+

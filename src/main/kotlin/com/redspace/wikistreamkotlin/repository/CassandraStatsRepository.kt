@@ -30,6 +30,7 @@ class CassandraStatsRepository(
                     try {
                         val currentSnapshot = statsSnapshotCassandraRepository.findById(StatsSnapshot.GLOBAL_ID)
                             .orElse(StatsSnapshot())
+                            ?: StatsSnapshot()
 
                         val updatedSnapshot = currentSnapshot.applyEvent(event)
                         statsSnapshotCassandraRepository.save(updatedSnapshot)
@@ -61,6 +62,7 @@ class CassandraStatsRepository(
             return withContext(Dispatchers.IO) {
                 statsSnapshotCassandraRepository.findById(StatsSnapshot.GLOBAL_ID)
                     .orElse(StatsSnapshot())
+                    ?: StatsSnapshot()
             }
         } catch (exception: CancellationException) {
             throw exception

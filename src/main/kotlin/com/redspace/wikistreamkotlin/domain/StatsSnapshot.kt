@@ -12,13 +12,13 @@ data class StatsSnapshot(
     @PrimaryKey
     val id: String = GLOBAL_ID,
     @Column("total_messages")
-    val totalMessages: Int = 0,
+    val totalMessages: Int = -1,
     @Column("distinct_users")
-    val distinctUsers: Int = 0,
+    val distinctUsers: Int = -1,
     @Column("bot_count")
-    val botCount: Int = 0,
+    val botCount: Int = -1,
     @Column("non_bot_count")
-    val nonBotCount: Int = 0,
+    val nonBotCount: Int = -1,
     @Column("count_by_server_url")
     @CassandraType(type = CassandraType.Name.MAP, typeArguments = [CassandraType.Name.TEXT, CassandraType.Name.INT])
     val countByServerUrl: Map<String, Int> = emptyMap(),

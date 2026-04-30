@@ -84,6 +84,46 @@ class StatsSnapshotError(
 	cause = cause
 )
 
+class UserAlreadyExistsError(
+	message: String,
+	cause: Throwable? = null
+) : HttpAppError(
+	type = "user_already_exists_error",
+	status = HttpStatus.CONFLICT,
+	message = message,
+	cause = cause
+)
+
+class InvalidCredentialsError(
+	message: String,
+	cause: Throwable? = null
+) : HttpAppError(
+	type = "invalid_credentials_error",
+	status = HttpStatus.UNAUTHORIZED,
+	message = message,
+	cause = cause
+)
+
+class AuthValidationError(
+	message: String,
+	cause: Throwable? = null
+) : HttpAppError(
+	type = "auth_validation_error",
+	status = HttpStatus.BAD_REQUEST,
+	message = message,
+	cause = cause
+)
+
+//class TokenRevokedError(
+//	message: String,
+//	cause: Throwable? = null
+//) : HttpAppError(
+//	type = "token_revoked_error",
+//	status = HttpStatus.UNAUTHORIZED,
+//	message = message,
+//	cause = cause
+//)
+
 class UnexpectedAppError(
 	message: String,
 	cause: Throwable? = null

@@ -1,6 +1,6 @@
 package com.redspace.wikistreamkotlin.config
 
-import org.springframework.boot.autoconfigure.cassandra.CqlSessionBuilderCustomizer
+import org.springframework.boot.cassandra.autoconfigure.CqlSessionBuilderCustomizer
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import java.nio.file.Path
