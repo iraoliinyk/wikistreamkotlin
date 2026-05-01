@@ -41,8 +41,9 @@ class RevokedTokenWebFilter(
                 val jti = authentication.token.id
                 // if token has no jti, filter cannot check revocation, so it allows request
                 if (jti.isNullOrBlank()) {
-                    return@flatMap chain.filter(exchange)
+                    return@flatMap Mono.just(true)
                 }
+
                 Mono.fromCallable {
                     revokedTokenCassandraRepository.findById(jti).orElse(null)
                 }
@@ -51,16 +52,19 @@ class RevokedTokenWebFilter(
                     // denied necessary resources (like CPU time or locks) because "greedy" threads
                     // consume them, preventing the starved thread from making progress
                     .subscribeOn(Schedulers.boundedElastic())
-                    .flatMap { revokedToken ->
-                        if (revokedToken.expiresAt.isAfter(Instant.now())) {
-                            exchange.response.statusCode = HttpStatus.UNAUTHORIZED
-                            exchange.response.setComplete()
-                        } else {
-                            chain.filter(exchange)
-                        }
+                    .map { revokedToken ->
+                        revokedToken == null || !revokedToken.expiresAt.isAfter(Instant.now())
                     }
             }
-            .switchIfEmpty(chain.filter(exchange))
+            .defaultIfEmpty(true)
+            .flatMap { isAllowed ->
+                if (isAllowed) {
+                    chain.filter(exchange)
+                } else {
+                    exchange.response.statusCode = HttpStatus.UNAUTHORIZED
+                    exchange.response.setComplete()
+                }
+            }
     }
 }
 

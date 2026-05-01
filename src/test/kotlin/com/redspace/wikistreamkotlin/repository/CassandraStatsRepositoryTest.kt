@@ -18,10 +18,11 @@ class CassandraStatsRepositoryTest {
 
     @Test
     fun `record persists updated snapshot to Cassandra`() = runBlocking {
-        `when`(snapshotRepository.findById(StatsSnapshot.GLOBAL_ID)).thenReturn(Optional.empty())
+        `when`(snapshotRepository.findById("user@example.com")).thenReturn(Optional.empty())
         `when`(snapshotRepository.save(any(StatsSnapshot::class.java))).thenAnswer { it.getArgument(0) }
 
-        repository.record(
+        repository.recordForUser(
+            "user@example.com",
             WikiEventMockFactory.createWikiEvent(
                 user = "alice",
                 bot = false
@@ -32,7 +33,7 @@ class CassandraStatsRepositoryTest {
         verify(snapshotRepository).save(snapshotCaptor.capture())
 
         val storedSnapshot = snapshotCaptor.value
-        assertEquals(StatsSnapshot.GLOBAL_ID, storedSnapshot.id)
+        assertEquals("user@example.com", storedSnapshot.id)
         assertEquals(1, storedSnapshot.totalMessages)
         assertEquals(1, storedSnapshot.distinctUsers)
         assertEquals(0, storedSnapshot.botCount)
@@ -43,11 +44,11 @@ class CassandraStatsRepositoryTest {
 
     @Test
     fun `snapshot returns empty aggregate when row is not yet stored`() = runBlocking {
-        `when`(snapshotRepository.findById(StatsSnapshot.GLOBAL_ID)).thenReturn(Optional.empty())
+        `when`(snapshotRepository.findById("user@example.com")).thenReturn(Optional.empty())
 
-        val snapshot = repository.snapshot()
+        val snapshot = repository.snapshotForUser("user@example.com")
 
-        assertEquals(StatsSnapshot.GLOBAL_ID, snapshot.id)
+        assertEquals("user@example.com", snapshot.id)
         assertEquals(0, snapshot.totalMessages)
         assertEquals(0, snapshot.distinctUsers)
         assertEquals(0, snapshot.botCount)
@@ -55,4 +56,3 @@ class CassandraStatsRepositoryTest {
         assertEquals(emptyMap<String, Int>(), snapshot.countByServerUrl)
     }
 }
-

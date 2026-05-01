@@ -5,37 +5,43 @@ import com.redspace.wikistreamkotlin.domain.WikiEvent
 import com.redspace.wikistreamkotlin.exception.AppError
 import com.redspace.wikistreamkotlin.exception.StatsRecordingError
 import com.redspace.wikistreamkotlin.exception.StatsSnapshotError
-import kotlinx.coroutines.CancellationException
 import com.redspace.wikistreamkotlin.repository.StatsRepository
+import kotlinx.coroutines.CancellationException
 import org.springframework.stereotype.Service
 
 @Service
-class StatsService(private val statsRepository: StatsRepository) {
-    suspend fun record(event: WikiEvent) {
+class StatsService(
+    private val statsRepository: StatsRepository,
+    private val activeUserSessionService: ActiveUserSessionService
+) {
+    suspend fun recordForActiveUsers(event: WikiEvent) {
         try {
-            statsRepository.record(event)
+            val activeUsers = activeUserSessionService.listActiveUsers()
+            for (email in activeUsers) {
+                statsRepository.recordForUser(email, event)
+            }
         } catch (exception: CancellationException) {
             throw exception
         } catch (error: AppError) {
             throw error
         } catch (exception: Exception) {
             throw StatsRecordingError(
-                message = "Failed to record wiki event with id=${event.id}",
+                message = "Failed to record wiki event with id=${event.id} for active users",
                 cause = exception
             )
         }
     }
 
-    suspend fun getSnapshot(): StatsSnapshot {
+    suspend fun getSnapshotForUser(userEmail: String): StatsSnapshot {
         try {
-            return statsRepository.snapshot()
+            return statsRepository.snapshotForUser(userEmail)
         } catch (exception: CancellationException) {
             throw exception
         } catch (error: AppError) {
             throw error
         } catch (exception: Exception) {
             throw StatsSnapshotError(
-                message = "Failed to fetch stats snapshot",
+                message = "Failed to fetch stats snapshot for user '$userEmail'",
                 cause = exception
             )
         }

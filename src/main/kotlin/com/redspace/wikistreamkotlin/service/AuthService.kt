@@ -26,7 +26,8 @@ class AuthService(
     private val userAccountRepository: UserAccountCassandraRepository,
     private val revokedTokenRepository: RevokedTokenCassandraRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val jwtTokenService: JwtTokenService
+    private val jwtTokenService: JwtTokenService,
+    private val activeUserSessionService: ActiveUserSessionService
 ) {
 
     suspend fun emailExists(rawEmail: String): Boolean = withContext(Dispatchers.IO) {
@@ -67,6 +68,7 @@ class AuthService(
             throw InvalidCredentialsError("Invalid email or password")
         }
 
+        activeUserSessionService.markLoggedIn(user.email)
         jwtTokenService.createAccessToken(user.email)
     }
 
@@ -83,6 +85,7 @@ class AuthService(
                 revokedAt = Instant.now()
             )
         )
+        activeUserSessionService.markLoggedOut(jwt.subject)
     }
 
     private fun normalizeEmail(rawEmail: String): String {
@@ -107,4 +110,3 @@ class AuthService(
         private val EMAIL_REGEX = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$")
     }
 }
-

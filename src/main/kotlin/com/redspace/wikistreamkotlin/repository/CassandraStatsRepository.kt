@@ -21,16 +21,16 @@ class CassandraStatsRepository(
         private const val MAX_SAVE_RETRIES = 3
     }
 
-    override suspend fun record(event: WikiEvent) {
+    override suspend fun recordForUser(userEmail: String, event: WikiEvent) {
         try {
             withContext(Dispatchers.IO) {
                 var lastOptimisticLockingFailure: OptimisticLockingFailureException? = null
 
                 repeat(MAX_SAVE_RETRIES) {
                     try {
-                        val currentSnapshot = statsSnapshotCassandraRepository.findById(StatsSnapshot.GLOBAL_ID)
-                            .orElse(StatsSnapshot())
-                            ?: StatsSnapshot()
+                        val currentSnapshot = statsSnapshotCassandraRepository.findById(userEmail)
+                            .orElse(StatsSnapshot(id = userEmail))
+                            ?: StatsSnapshot(id = userEmail)
 
                         val updatedSnapshot = currentSnapshot.applyEvent(event)
                         statsSnapshotCassandraRepository.save(updatedSnapshot)
@@ -41,7 +41,7 @@ class CassandraStatsRepository(
                 }
 
                 throw RepositoryWriteError(
-                    message = "Failed to record wiki event in Cassandra after $MAX_SAVE_RETRIES retries",
+                    message = "Failed to record wiki event for user '$userEmail' in Cassandra after $MAX_SAVE_RETRIES retries",
                     cause = lastOptimisticLockingFailure
                 )
             }
@@ -51,24 +51,24 @@ class CassandraStatsRepository(
             throw error
         } catch (exception: Exception) {
             throw RepositoryWriteError(
-                message = "Failed to record wiki event in Cassandra",
+                message = "Failed to record wiki event for user '$userEmail' in Cassandra",
                 cause = exception
             )
         }
     }
 
-    override suspend fun snapshot(): StatsSnapshot {
+    override suspend fun snapshotForUser(userEmail: String): StatsSnapshot {
         try {
             return withContext(Dispatchers.IO) {
-                statsSnapshotCassandraRepository.findById(StatsSnapshot.GLOBAL_ID)
-                    .orElse(StatsSnapshot())
-                    ?: StatsSnapshot()
+                statsSnapshotCassandraRepository.findById(userEmail)
+                    .orElse(StatsSnapshot(id = userEmail))
+                    ?: StatsSnapshot(id = userEmail)
             }
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
             throw RepositoryReadError(
-                message = "Failed to fetch stats snapshot from Cassandra",
+                message = "Failed to fetch stats snapshot for user '$userEmail' from Cassandra",
                 cause = exception
             )
         }
@@ -93,4 +93,3 @@ class CassandraStatsRepository(
         )
     }
 }
-

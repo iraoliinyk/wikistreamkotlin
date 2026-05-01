@@ -18,6 +18,7 @@ import org.mockito.kotlin.argThat
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.same
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
@@ -31,8 +32,15 @@ class AuthServiceTest {
     private val revokedRepo: RevokedTokenCassandraRepository = mock()
     private val passwordEncoder = BCryptPasswordEncoder()
     private val jwtTokenService: JwtTokenService = mock()
+    private val activeUserSessionService: ActiveUserSessionService = mock()
 
-    private val authService = AuthService(userRepo, revokedRepo, passwordEncoder, jwtTokenService)
+    private val authService = AuthService(
+        userRepo,
+        revokedRepo,
+        passwordEncoder,
+        jwtTokenService,
+        activeUserSessionService
+    )
 
     @Test
     fun `register saves normalized email with hashed password`() = runBlocking {
@@ -72,6 +80,7 @@ class AuthServiceTest {
 
         assertEquals("token", response.accessToken)
         assertEquals(3600, response.expiresIn)
+        verify(activeUserSessionService).markLoggedIn("user@example.com")
     }
 
     @Test
@@ -101,6 +110,6 @@ class AuthServiceTest {
         verify(revokedRepo).save(argThat {
             jti == "jti-123" && email == "user@example.com"
         })
+        verify(activeUserSessionService).markLoggedOut(same("user@example.com"))
     }
 }
-

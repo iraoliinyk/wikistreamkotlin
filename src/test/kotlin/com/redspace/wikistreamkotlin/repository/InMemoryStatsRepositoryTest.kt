@@ -19,7 +19,8 @@ class InMemoryStatsRepositoryTest {
             val jobs = listOf(
                 launch(Dispatchers.Default) {
                     repeat(eventsPerProducer) {
-                        repository.record(
+                        repository.recordForUser(
+                            "user@example.com",
                             WikiEventMockFactory.createWikiEvent(
                                 id = it.toLong(),
                                 user = "alice",
@@ -30,7 +31,8 @@ class InMemoryStatsRepositoryTest {
                 },
                 launch(Dispatchers.Default) {
                     repeat(eventsPerProducer) {
-                        repository.record(
+                        repository.recordForUser(
+                            "user@example.com",
                             WikiEventMockFactory.createWikiEvent(
                                 id = (1_000 + it).toLong(),
                                 user = "bot-user",
@@ -43,7 +45,7 @@ class InMemoryStatsRepositoryTest {
             jobs.joinAll()
         }
 
-        val snapshot = repository.snapshot()
+        val snapshot = repository.snapshotForUser("user@example.com")
         assertEquals(eventsPerProducer * 2, snapshot.totalMessages)
         assertEquals(2, snapshot.distinctUsers)
         assertEquals(eventsPerProducer, snapshot.botCount)
@@ -51,4 +53,3 @@ class InMemoryStatsRepositoryTest {
         assertEquals(eventsPerProducer * 2, snapshot.countByServerUrl["https://en.wikipedia.org"])
     }
 }
-

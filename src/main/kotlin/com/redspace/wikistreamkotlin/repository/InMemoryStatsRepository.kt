@@ -14,58 +14,50 @@ import org.springframework.stereotype.Repository
 @ConditionalOnProperty(name = ["app.stats.repository.type"], havingValue = "in-memory")
 class InMemoryStatsRepository : StatsRepository {
 
-    companion object {
-        private const val SNAPSHOT_ID_PREFIX = "snapshot-"
-    }
-
     private val lock = Mutex()
-    private var totalMessages: Int = 0
-    private var botCount: Int = 0
-    private var nonBotCount: Int = 0
-    private val distinctUsers = mutableSetOf<String>()
-    private val serverUrlCounts = mutableMapOf<String, Int>()
+    private val snapshotsByUser = mutableMapOf<String, StatsSnapshot>()
 
-    override suspend fun record(event: WikiEvent) {
+    override suspend fun recordForUser(userEmail: String, event: WikiEvent) {
         try {
             lock.withLock {
-                totalMessages += 1
-                event.user?.let { distinctUsers.add(it) }
-                if (event.bot == true) {
-                    botCount += 1
-                } else {
-                    nonBotCount += 1
-                }
-                event.serverUrl?.let { serverUrl ->
-                    serverUrlCounts[serverUrl] = (serverUrlCounts[serverUrl] ?: 0) + 1
-                }
-            }
-        } catch (exception: CancellationException) {
-            throw exception
-        } catch (exception: Exception) {
-            throw RepositoryWriteError(
-                message = "Failed to record wiki event in memory",
-                cause = exception
-            )
-        }
-    }
+                val current = snapshotsByUser[userEmail] ?: StatsSnapshot(id = userEmail)
 
-    override suspend fun snapshot(): StatsSnapshot {
-        try {
-            return lock.withLock {
-                StatsSnapshot(
-                    id = "$SNAPSHOT_ID_PREFIX${System.currentTimeMillis()}",
-                    totalMessages = totalMessages,
-                    distinctUsers = distinctUsers.size,
-                    botCount = botCount,
-                    nonBotCount = nonBotCount,
-                    countByServerUrl = serverUrlCounts.toMap()
+                val normalizedUser = event.user?.takeIf { it.isNotBlank() }
+                val updatedTrackedUsers = normalizedUser?.let { current.trackedUsers + it } ?: current.trackedUsers
+                val normalizedServerUrl = event.serverUrl?.takeIf { it.isNotBlank() }
+                val updatedCountByServerUrl = normalizedServerUrl?.let { serverUrl ->
+                    current.countByServerUrl + (serverUrl to ((current.countByServerUrl[serverUrl] ?: 0) + 1))
+                } ?: current.countByServerUrl
+
+                snapshotsByUser[userEmail] = current.copy(
+                    totalMessages = current.totalMessages + 1,
+                    distinctUsers = updatedTrackedUsers.size,
+                    botCount = current.botCount + if (event.bot == true) 1 else 0,
+                    nonBotCount = current.nonBotCount + if (event.bot == true) 0 else 1,
+                    countByServerUrl = updatedCountByServerUrl,
+                    trackedUsers = updatedTrackedUsers
                 )
             }
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
+            throw RepositoryWriteError(
+                message = "Failed to record wiki event in memory for user '$userEmail'",
+                cause = exception
+            )
+        }
+    }
+
+    override suspend fun snapshotForUser(userEmail: String): StatsSnapshot {
+        try {
+            return lock.withLock {
+                snapshotsByUser[userEmail] ?: StatsSnapshot(id = userEmail)
+            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
             throw RepositoryReadError(
-                message = "Failed to build stats snapshot from in-memory state",
+                message = "Failed to build stats snapshot from in-memory state for user '$userEmail'",
                 cause = exception
             )
         }
