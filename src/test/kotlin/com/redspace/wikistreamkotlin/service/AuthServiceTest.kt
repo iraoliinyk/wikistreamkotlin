@@ -4,6 +4,7 @@ import com.redspace.wikistreamkotlin.controller.dto.LoginRequest
 import com.redspace.wikistreamkotlin.controller.dto.RegisterRequest
 import com.redspace.wikistreamkotlin.controller.dto.TokenResponse
 import com.redspace.wikistreamkotlin.domain.UserAccount
+import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
@@ -12,6 +13,7 @@ import com.redspace.wikistreamkotlin.security.JwtTokenService
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argThat
@@ -43,16 +45,21 @@ class AuthServiceTest {
     )
 
     @Test
-    fun `register saves normalized email with hashed password`() = runBlocking {
-        whenever(userRepo.existsById("user@example.com")).thenReturn(false)
-        whenever(userRepo.save(any())).thenAnswer { it.arguments[0] as UserAccount }
+    fun `register saves normalized email with hashed password`() {
+        runBlocking {
+            whenever(userRepo.existsById("user@example.com")).thenReturn(false)
+            whenever(userRepo.save(any())).thenAnswer { it.arguments[0] as UserAccount }
 
-        val response = authService.register(RegisterRequest(email = " User@Example.com ", password = "password123"))
+            val response = authService.register(RegisterRequest(email = " User@Example.com ", password = "password123"))
 
-        assertEquals("user@example.com", response.email)
-        verify(userRepo).save(argThat {
-            email == "user@example.com" && passwordHash != "password123" && passwordEncoder.matches("password123", passwordHash)
-        })
+            assertEquals("user@example.com", response.email)
+            verify(userRepo).save(argThat {
+                email == "user@example.com" && passwordHash != "password123" && passwordEncoder.matches(
+                    "password123",
+                    passwordHash
+                )
+            })
+        }
     }
 
     @Test
@@ -111,5 +118,99 @@ class AuthServiceTest {
             jti == "jti-123" && email == "user@example.com"
         })
         verify(activeUserSessionService).markLoggedOut(same("user@example.com"))
+    }
+
+    // -------------------------------------------------- emailExists --------------------------------------------------
+
+    @Test
+    fun `emailExists returns true when user is registered`() = runBlocking {
+        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
+
+        assertTrue(authService.emailExists("user@example.com"))
+    }
+
+    @Test
+    fun `emailExists returns false when user is not registered`() = runBlocking {
+        whenever(userRepo.existsById("unknown@example.com")).thenReturn(false)
+
+        assertEquals(false, authService.emailExists("unknown@example.com"))
+    }
+
+    @Test
+    fun `emailExists normalizes email before lookup`() = runBlocking {
+        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
+
+        assertTrue(authService.emailExists(" User@Example.COM "))
+    }
+
+    // -------------------------------------------------- register edge cases --------------------------------------------------
+
+    @Test
+    fun `register throws AuthValidationError for blank email`() {
+        assertThrows(AuthValidationError::class.java) {
+            runBlocking { authService.register(RegisterRequest(email = "   ", password = "password123")) }
+        }
+    }
+
+    @Test
+    fun `register throws AuthValidationError for invalid email format`() {
+        assertThrows(AuthValidationError::class.java) {
+            runBlocking { authService.register(RegisterRequest(email = "not-an-email", password = "password123")) }
+        }
+    }
+
+    @Test
+    fun `register throws AuthValidationError when password is shorter than 8 characters`() {
+        whenever(userRepo.existsById(any())).thenReturn(false)
+
+        assertThrows(AuthValidationError::class.java) {
+            runBlocking { authService.register(RegisterRequest(email = "user@example.com", password = "short")) }
+        }
+
+        verify(userRepo, never()).save(any())
+    }
+
+    // -------------------------------------------------- login edge cases --------------------------------------------------
+
+    @Test
+    fun `login throws InvalidCredentialsError for inactive user`() {
+        val hash = passwordEncoder.encode("password123") ?: error("Password hash should not be null")
+        whenever(userRepo.findById("user@example.com"))
+            .thenReturn(Optional.of(UserAccount(email = "user@example.com", passwordHash = hash, active = false)))
+
+        assertThrows(InvalidCredentialsError::class.java) {
+            runBlocking { authService.login(LoginRequest(email = "user@example.com", password = "password123")) }
+        }
+    }
+
+    @Test
+    fun `login throws InvalidCredentialsError for wrong password`() {
+        val hash = passwordEncoder.encode("correct-password") ?: error("Password hash should not be null")
+        whenever(userRepo.findById("user@example.com"))
+            .thenReturn(Optional.of(UserAccount(email = "user@example.com", passwordHash = hash, active = true)))
+
+        assertThrows(InvalidCredentialsError::class.java) {
+            runBlocking { authService.login(LoginRequest(email = "user@example.com", password = "wrong-password")) }
+        }
+    }
+
+    // -------------------------------------------------- logout edge cases --------------------------------------------------
+
+    @Test
+    fun `logout throws AuthValidationError when token has no jti`() {
+        val now = Instant.now()
+        val jwt = Jwt.withTokenValue("token")
+            .subject("user@example.com")
+            .issuedAt(now)
+            .expiresAt(now.plusSeconds(3600))
+            .header("alg", "HS256")
+            .build()
+        whenever(jwtTokenService.extractJti(jwt)).thenReturn(null)
+
+        assertThrows(AuthValidationError::class.java) {
+            runBlocking { authService.logout(jwt) }
+        }
+
+        verify(revokedRepo, never()).save(any())
     }
 }
