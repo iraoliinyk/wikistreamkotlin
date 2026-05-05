@@ -12,12 +12,14 @@ import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.security.JwtTokenService
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
-import org.mockito.kotlin.argThat
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.doAnswer
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.same
@@ -48,17 +50,20 @@ class AuthServiceTest {
     fun `register saves normalized email with hashed password`() {
         runBlocking {
             whenever(userRepo.existsById("user@example.com")).thenReturn(false)
-            whenever(userRepo.save(any())).thenAnswer { it.arguments[0] as UserAccount }
+            doAnswer { invocation -> invocation.getArgument<UserAccount>(0) }
+                .whenever(userRepo)
+                .save(any<UserAccount>())
 
             val response = authService.register(RegisterRequest(email = " User@Example.com ", password = "password123"))
 
             assertEquals("user@example.com", response.email)
-            verify(userRepo).save(argThat {
-                email == "user@example.com" && passwordHash != "password123" && passwordEncoder.matches(
-                    "password123",
-                    passwordHash
-                )
-            })
+            val savedUserCaptor = argumentCaptor<UserAccount>()
+            verify(userRepo).save(savedUserCaptor.capture())
+            val savedUser = savedUserCaptor.firstValue
+
+            assertEquals("user@example.com", savedUser.email)
+            assertNotEquals("password123", savedUser.passwordHash)
+            assertTrue(passwordEncoder.matches("password123", savedUser.passwordHash))
         }
     }
 
@@ -114,9 +119,11 @@ class AuthServiceTest {
 
         authService.logout(jwt)
 
-        verify(revokedRepo).save(argThat {
-            jti == "jti-123" && email == "user@example.com"
-        })
+        val revokedTokenCaptor = argumentCaptor<com.redspace.wikistreamkotlin.domain.RevokedToken>()
+        verify(revokedRepo).save(revokedTokenCaptor.capture())
+        val savedToken = revokedTokenCaptor.firstValue
+        assertEquals("jti-123", savedToken.jti)
+        assertEquals("user@example.com", savedToken.email)
         verify(activeUserSessionService).markLoggedOut(same("user@example.com"))
     }
 
