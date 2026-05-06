@@ -45,16 +45,16 @@ class RevokedTokenWebFilter(
                 }
 
                 Mono.fromCallable {
-                    revokedTokenCassandraRepository.findById(jti).orElse(null)
+                    revokedTokenCassandraRepository.findById(jti).map { revokedToken ->
+                        !revokedToken.expiresAt.isAfter(Instant.now())
+                    }
+                        .orElse(true)
                 }
                     // Moves blocking call off event-loop thread to avoid WebFlux thread starvation.
                     // Thread starvation is a concurrency issue where a thread is perpetually
                     // denied necessary resources (like CPU time or locks) because "greedy" threads
                     // consume them, preventing the starved thread from making progress
                     .subscribeOn(Schedulers.boundedElastic())
-                    .map { revokedToken ->
-                        !revokedToken.expiresAt.isAfter(Instant.now())
-                    }
                     // Repository outages should bypass revocation checks rather than fail the request.
                     .onErrorReturn(true)
             }

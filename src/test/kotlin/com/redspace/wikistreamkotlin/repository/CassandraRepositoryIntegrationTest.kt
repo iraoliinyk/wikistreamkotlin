@@ -59,7 +59,7 @@ class CassandraRepositoryIntegrationTest {
     companion object {
         @Container
         @JvmField
-        val cassandra: CassandraContainer = CassandraContainer("cassandra:4.1")
+        val cassandra: CassandraContainer = CassandraContainer("cassandra:5.0")
             .withStartupTimeout(Duration.ofMinutes(3))
 
         @DynamicPropertySource
