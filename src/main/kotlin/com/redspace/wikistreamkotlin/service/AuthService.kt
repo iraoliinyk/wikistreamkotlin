@@ -10,6 +10,7 @@ import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
+import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.security.JwtTokenService
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ import java.time.Instant
 @ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 class AuthService(
     private val userAccountRepository: UserAccountCassandraRepository,
+    private val userAccountAtomicRepository: UserAccountAtomicRepository,
     private val revokedTokenRepository: RevokedTokenCassandraRepository,
     private val passwordEncoder: PasswordEncoder,
     private val jwtTokenService: JwtTokenService,
@@ -38,25 +40,22 @@ class AuthService(
         val email = normalizeEmail(request.email)
         validatePassword(request.password)
 
-        if (userAccountRepository.existsById(email)) {
-            throw UserAlreadyExistsError("User with email '$email' already exists")
-        }
-
-        val passwordHash = passwordEncoder.encode(request.password)
+       val passwordHash = passwordEncoder.encode(request.password)
             ?: throw AuthValidationError("Password hashing failed")
 
         val now = Instant.now()
-        val saved = userAccountRepository.save(
-            UserAccount(
-                email = email,
-                passwordHash = passwordHash,
-                createdAt = now,
-                updatedAt = now,
-                active = true
-            )
+        val account = UserAccount(
+        email = email,
+        passwordHash = passwordHash,
+        createdAt = now,
+        updatedAt = now,
+        active = true
         )
-
-        RegisterResponse(email = saved.email, createdAt = saved.createdAt)
+        val inserted = userAccountAtomicRepository.insertIfNotExists(account)
+        if (!inserted) {
+            throw UserAlreadyExistsError("User with email '$email' already exists")
+        }
+        RegisterResponse(email = account.email, createdAt = account.createdAt)
     }
 
     suspend fun login(request: LoginRequest): TokenResponse = withContext(Dispatchers.IO) {

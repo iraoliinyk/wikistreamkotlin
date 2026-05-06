@@ -8,31 +8,22 @@ import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
+import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.security.JwtTokenService
 import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotEquals
-import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.any
-import org.mockito.kotlin.argumentCaptor
-import org.mockito.kotlin.doReturn
-import org.mockito.kotlin.doAnswer
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.never
-import org.mockito.kotlin.same
-import org.mockito.kotlin.verify
-import org.mockito.kotlin.whenever
+import org.mockito.kotlin.*
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.oauth2.jwt.Jwt
 import java.time.Instant
-import java.util.Optional
+import java.util.*
 
 class AuthServiceTest {
 
     private val userRepo: UserAccountCassandraRepository = mock()
+    private val userAccountAtomicRepo: UserAccountAtomicRepository = mock()
     private val revokedRepo: RevokedTokenCassandraRepository = mock()
     private val passwordEncoder = BCryptPasswordEncoder()
     private val jwtTokenService: JwtTokenService = mock()
@@ -40,6 +31,7 @@ class AuthServiceTest {
 
     private val authService = AuthService(
         userRepo,
+        userAccountAtomicRepo,
         revokedRepo,
         passwordEncoder,
         jwtTokenService,
@@ -47,23 +39,16 @@ class AuthServiceTest {
     )
 
     @Test
-    fun `register saves normalized email with hashed password`() {
+    fun `register fails when atomic insert reports duplicate`()  {
         runBlocking {
-            whenever(userRepo.existsById("user@example.com")).thenReturn(false)
-            doAnswer { invocation -> invocation.getArgument<UserAccount>(0) }
-                .whenever(userRepo)
-                .save(any<UserAccount>())
+        whenever(userAccountAtomicRepo.insertIfNotExists(any())).thenReturn(false)
 
-            val response = authService.register(RegisterRequest(email = " User@Example.com ", password = "password123"))
-
-            assertEquals("user@example.com", response.email)
-            val savedUserCaptor = argumentCaptor<UserAccount>()
-            verify(userRepo).save(savedUserCaptor.capture())
-            val savedUser = savedUserCaptor.firstValue
-
-            assertEquals("user@example.com", savedUser.email)
-            assertNotEquals("password123", savedUser.passwordHash)
-            assertTrue(passwordEncoder.matches("password123", savedUser.passwordHash))
+        assertThrows(UserAlreadyExistsError::class.java) {
+            runBlocking {
+                authService.register(RegisterRequest("user@example.com", "password123"))
+            }
+        }
+            verify(userAccountAtomicRepo).insertIfNotExists(any())
         }
     }
 

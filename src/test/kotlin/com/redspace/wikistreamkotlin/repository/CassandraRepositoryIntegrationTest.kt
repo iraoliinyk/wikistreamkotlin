@@ -4,11 +4,8 @@ import com.datastax.oss.driver.api.core.CqlSession
 import com.redspace.wikistreamkotlin.domain.RevokedToken
 import com.redspace.wikistreamkotlin.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.domain.UserAccount
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.Assertions.assertTrue
+import com.redspace.wikistreamkotlin.repository.CassandraRepositoryIntegrationTest.Companion.properties
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -49,11 +46,13 @@ class CassandraRepositoryIntegrationTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = [UserAccount::class, RevokedToken::class, StatsSnapshot::class])
-    @EnableCassandraRepositories(basePackageClasses = [
-        UserAccountCassandraRepository::class,
-        RevokedTokenCassandraRepository::class,
-        StatsSnapshotCassandraRepository::class,
-    ])
+    @EnableCassandraRepositories(
+        basePackageClasses = [
+            UserAccountCassandraRepository::class,
+            RevokedTokenCassandraRepository::class,
+            StatsSnapshotCassandraRepository::class,
+        ]
+    )
     class TestCassandraConfig
 
     companion object {
@@ -73,7 +72,7 @@ class CassandraRepositoryIntegrationTest {
                 .build().use { session ->
                     session.execute(
                         "CREATE KEYSPACE IF NOT EXISTS wikistream " +
-                            "WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}"
+                                "WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}"
                     )
                 }
 
@@ -103,7 +102,6 @@ class CassandraRepositoryIntegrationTest {
     }
 
     // -------------------------------------------------- UserAccountCassandraRepository --------------------------------------------------
-
     @Test
     fun `save and findById returns persisted UserAccount`() {
         val now = Instant.now()
