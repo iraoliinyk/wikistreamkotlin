@@ -30,8 +30,6 @@ class CassandraStatsRepository(
                     try {
                         val currentSnapshot = statsSnapshotCassandraRepository.findById(userEmail)
                             .orElse(StatsSnapshot(id = userEmail))
-                            ?: StatsSnapshot(id = userEmail)
-
                         val updatedSnapshot = currentSnapshot.applyEvent(event)
                         statsSnapshotCassandraRepository.save(updatedSnapshot)
                         return@withContext

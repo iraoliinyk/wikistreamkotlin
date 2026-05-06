@@ -207,7 +207,7 @@
             "stats"
           ]
         },
-        "description": "Fetch global stats aggregated from Wikipedia events (requires auth)"
+        "description": "Fetch per-user stats snapshot for the authenticated user (requires auth)"
       },
       "response": [],
       "event": [
@@ -221,14 +221,14 @@
               "});",
               "var jsonData = pm.response.json();",
               "pm.test('Stats has required fields', function () {",
-              "    pm.expect(jsonData.id).to.eql('global-stats');",
+              "    pm.expect(jsonData.id).to.eql(pm.collectionVariables.get('TEST_EMAIL'));",
               "    pm.expect(jsonData.totalMessages).to.exist;",
               "    pm.expect(jsonData.distinctUsers).to.exist;",
               "    pm.expect(jsonData.botCount).to.exist;",
               "    pm.expect(jsonData.nonBotCount).to.exist;",
               "    pm.expect(jsonData.countByServerUrl).to.exist;",
               "});",
-              "console.log('Total messages: ' + jsonData.totalMessages);"
+              "console.log('Stats snapshot for ' + jsonData.id + ' with total messages: ' + jsonData.totalMessages);"
             ]
           }
         }

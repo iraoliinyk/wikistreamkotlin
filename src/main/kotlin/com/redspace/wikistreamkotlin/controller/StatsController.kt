@@ -2,6 +2,7 @@ package com.redspace.wikistreamkotlin.controller
 
 import com.redspace.wikistreamkotlin.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.exception.AuthValidationError
+import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.service.StatsService
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
@@ -15,7 +16,7 @@ class StatsController(private val statsService: StatsService) {
     @GetMapping("/stats")
     suspend fun getStats(@AuthenticationPrincipal jwt: Jwt): StatsSnapshot {
         val userEmail = jwt.subject?.takeIf { it.isNotBlank() }
-            ?: throw AuthValidationError("JWT subject is missing")
+            ?: throw InvalidCredentialsError("JWT subject is missing")
         return statsService.getSnapshotForUser(userEmail)
     }
 

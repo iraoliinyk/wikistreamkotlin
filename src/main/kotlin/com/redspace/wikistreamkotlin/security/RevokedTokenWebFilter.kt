@@ -53,8 +53,10 @@ class RevokedTokenWebFilter(
                     // consume them, preventing the starved thread from making progress
                     .subscribeOn(Schedulers.boundedElastic())
                     .map { revokedToken ->
-                        revokedToken == null || !revokedToken.expiresAt.isAfter(Instant.now())
+                        !revokedToken.expiresAt.isAfter(Instant.now())
                     }
+                    // Repository outages should bypass revocation checks rather than fail the request.
+                    .onErrorReturn(true)
             }
             .defaultIfEmpty(true)
             .flatMap { isAllowed ->

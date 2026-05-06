@@ -38,15 +38,11 @@ class GlobalErrorHandler(
 
     @ExceptionHandler(WebExchangeBindException::class, ServerWebInputException::class)
     fun handleBadRequest(
-        exception: Exception,
         request: ServerHttpRequest
     ): ProblemDetail {
-        val error = AuthValidationError(
-            message = "Invalid request payload",
-            cause = exception
+        return request.badRequestProblemDetail(
+            detail = "Invalid request payload"
         )
-        appErrorLogger.log(error, context = mapOf("path" to request.path.value()))
-        return error.toProblemDetail(request)
     }
 
     private fun AppError.toProblemDetail(request: ServerHttpRequest): ProblemDetail {
@@ -55,6 +51,17 @@ class GlobalErrorHandler(
             title = this@toProblemDetail.type
             setProperty("type", this@toProblemDetail.type)
             setProperty("path", request.path.value())
+            setProperty("timestamp", Instant.now().toString())
+        }
+    }
+
+    private fun ServerHttpRequest.badRequestProblemDetail(
+        detail: String
+    ): ProblemDetail {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail).apply {
+            title = "request_validation_error"
+            setProperty("type", "request_validation_error")
+            setProperty("path", this@badRequestProblemDetail.path.value())
             setProperty("timestamp", Instant.now().toString())
         }
     }
