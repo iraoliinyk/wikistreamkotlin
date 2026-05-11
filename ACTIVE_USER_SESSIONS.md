@@ -117,10 +117,20 @@ TTL: 3600 seconds (matches JWT expiry)
 
 | Variable | Default | Context | Effect |
 |---|---|---|---|
-| `APP_SESSION_BACKEND` | `in-memory` (test), `redis` (Docker) | `application.properties` + env override | Selects `RedisSessionRepository` or `InMemorySessionRepository` |
+| `APP_SESSION_BACKEND` | `redis` (repo default) | Root `.env` (consumed by both compose files) + `application.properties` override | Selects `RedisSessionRepository` or `InMemorySessionRepository` |
 | `SPRING_DATA_REDIS_HOST` | `localhost` | Docker Compose | Redis service hostname (DNS resolves in Docker network) |
 | `SPRING_DATA_REDIS_PORT` | `6379` | Docker Compose | Redis port |
 | `APP_JWT_ACCESS_TOKEN_TTL_SECONDS` | (required) | `config/auth-secrets.properties` | Drives both JWT expiry and session TTL |
+
+The single source of truth for session backend in Docker flows is:
+
+- `.env` → `APP_SESSION_BACKEND=redis`
+
+Redis container startup is profile-based:
+
+- `redis` service has `profiles: ["redis"]`
+- Start command should pass profile from `.env`
+- If `APP_SESSION_BACKEND=in-memory`, Redis profile is not activated and Redis container is not started
 
 ### Docker Compose Setup
 
@@ -137,7 +147,7 @@ wikistreamkotlin:
   environment:
     SPRING_DATA_REDIS_HOST: redis
     SPRING_DATA_REDIS_PORT: 6379
-    APP_SESSION_BACKEND: redis
+    APP_SESSION_BACKEND: ${APP_SESSION_BACKEND}
     APP_JWT_ACCESS_TOKEN_TTL_SECONDS: 3600
   depends_on:
     redis:
@@ -155,7 +165,7 @@ wikistreamkotlin:
   environment:
     SPRING_DATA_REDIS_HOST: redis
     SPRING_DATA_REDIS_PORT: 6379
-    APP_SESSION_BACKEND: redis
+    APP_SESSION_BACKEND: ${APP_SESSION_BACKEND}
 ```
 
 ## Integration with Stats Recording

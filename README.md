@@ -20,6 +20,9 @@ Copy `config/cassandra-secrets.properties.template` to `config/cassandra-secrets
 JWT auth secrets must not be committed.
 Copy `config/auth-secrets.properties.template` to `config/auth-secrets.properties` and set a strong signing secret.
 
+Session backend selection is centralized in the root `.env` file.
+Both `docker-compose.yml` and `docker-compose.astra.yml` read `APP_SESSION_BACKEND` from this file.
+
 ---
 
 ## Documentation
@@ -139,6 +142,8 @@ Schema is defined in `src/main/resources/db/cassandra/schema.cql` and applied au
 `docker-compose.yml` starts local Redis and Cassandra 5.0 containers, applies the schema, then starts the app.
 No external credentials required.
 
+`APP_SESSION_BACKEND` comes from `.env` (single source of truth). Default in repo is `redis`.
+
 **Step 1** — (Optional) create JWT auth secrets file:
 
 ```bash
@@ -158,13 +163,13 @@ app.security.jwt.access-token-ttl-seconds=3600
 **Step 2** — Start all services and build image:
 
 ```bash
-docker compose up --build
+docker compose --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build
 ```
 
 Run in detached mode:
 
 ```bash
-docker compose up --build -d
+docker compose --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build -d
 ```
 
 **Step 3** — Verify the app is running:
@@ -212,6 +217,8 @@ SELECT * FROM revoked_tokens LIMIT 20;
 `docker-compose.astra.yml` starts local Redis + app (no local Cassandra). All DB calls go to Astra cloud.
 The `config/` directory is mounted read-only into the container so secrets are never baked into the image.
 
+`APP_SESSION_BACKEND` comes from `.env` (single source of truth). Default in repo is `redis`.
+
 **Step 1** — Prepare secrets files:
 
 ```bash
@@ -247,13 +254,13 @@ Open the Astra web UI → **Data Explorer** → run the SQL from `src/main/resou
 **Step 5** — Start app connected to Astra:
 
 ```bash
-docker compose -f docker-compose.astra.yml up --build
+docker compose -f docker-compose.astra.yml --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build
 ```
 
 Detached:
 
 ```bash
-docker compose -f docker-compose.astra.yml up --build -d
+docker compose -f docker-compose.astra.yml --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build -d
 ```
 
 **Step 6** — Verify:

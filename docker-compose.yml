@@ -2,6 +2,7 @@ services:
   redis:
     image: redis:7
     container_name: wikistream-redis
+    profiles: ["redis"]
     ports:
       - "6379:6379"
     healthcheck:
@@ -47,6 +48,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+        required: false
       cassandra-init:
         condition: service_completed_successfully
     environment:
@@ -61,7 +63,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_TIMEOUT: 2000ms
-      APP_SESSION_BACKEND: redis
+      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND}
 
     ports:
       - "7000:7000"
