@@ -8,4 +8,3 @@ data class JwtSecurityProperties(
     val secret: String = "default-secret",
     val accessTokenTtlSeconds: Long = 42L
 )
-

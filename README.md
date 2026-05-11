@@ -22,6 +22,78 @@ Copy `config/auth-secrets.properties.template` to `config/auth-secrets.propertie
 
 ---
 
+## Documentation
+
+### Authentication & Authorization
+
+- **[JWT & Bearer Token Scheme](JWT_BEARER_SCHEME.md)** — Token structure, signing, validation, revocation mechanisms, and detailed request lifecycle
+
+### Session Management
+
+- **[Active User Sessions](ACTIVE_USER_SESSIONS.md)** — User login state tracking via Redis/in-memory, background stats recording, metadata schema, configuration, and error handling
+
+---
+
+## Tech Stack
+
+### Language & Runtime
+| Component | Version |
+|---|---|
+| Kotlin | 2.2.21 |
+| Java | 24 (Eclipse Temurin) |
+| Gradle | 9.x (Kotlin DSL) |
+
+### Framework
+| Component | Version | Role |
+|---|---|---|
+| Spring Boot | 4.0.5 | Application framework |
+| Spring WebFlux | (Boot-managed) | Reactive HTTP server (Netty) |
+| Spring Data Cassandra | (Boot-managed) | Cassandra ORM |
+| Spring Data Redis | (Boot-managed) | Redis session storage |
+| Spring Security | (Boot-managed) | Auth filter chain |
+| Spring Security OAuth2 Resource Server + Jose | (Boot-managed) | JWT decode & validation |
+| Kotlinx Coroutines + Reactor bridge | (Boot-managed) | Coroutine ↔ Reactor interop |
+
+### Storage
+| Store | Usage |
+|---|---|
+| Apache Cassandra 5.0 | User accounts, stats snapshots, revoked tokens |
+| Redis 7 | Active session tracking (login/logout state) |
+| DataStax Astra | Cloud-hosted Cassandra (Astra profile) |
+
+### External Data Source
+| Source | Protocol |
+|---|---|
+| [Wikimedia recent-change stream](https://stream.wikimedia.org/v2/stream/recentchange) | Server-Sent Events (SSE) via `WebClient` |
+
+### Auth
+| Mechanism | Details |
+|---|---|
+| JWT (HS256) | Signed with app secret, TTL-based expiry |
+| Bearer scheme | `Authorization: Bearer <token>` on protected routes |
+| Token revocation | Blocked server-side via `revoked_tokens` Cassandra table + `jti` lookup |
+| Session state | Redis hash per email, TTL mirrors JWT expiry |
+
+### Testing
+| Library | Role |
+|---|---|
+| JUnit 5 | Test runner |
+| Mockito-Kotlin 5.4.0 | Mocking |
+| Spring Boot Test | Integration test support |
+| WebTestClient | HTTP-layer integration tests |
+| Reactor Test | Reactive stream assertions |
+| Testcontainers 2.0.4 | Real Redis and Cassandra in tests |
+
+### Infrastructure
+| Component | Details |
+|---|---|
+| Docker | Multi-stage build (builder: JDK 24, runtime: JRE 24) |
+| Docker Compose | `docker-compose.yml` (local), `docker-compose.astra.yml` (Astra) |
+| Lettuce | Reactive Redis client (pooled, configurable host/port) |
+| kotlin-logging-jvm 2.0.11 | Structured logging facade |
+
+---
+
 ## API Reference
 
 ### Stats
