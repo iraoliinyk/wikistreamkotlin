@@ -20,4 +20,3 @@ data class UserAccount(
 	@Column("active")
 	val active: Boolean = true
 )
-

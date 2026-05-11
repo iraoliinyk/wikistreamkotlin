@@ -16,4 +16,3 @@ data class RevokedToken(
     @Column("revoked_at")
     val revokedAt: Instant = Instant.now()
 )
-

@@ -1,11 +1,6 @@
 package com.redspace.wikistreamkotlin.controller
 
-import com.redspace.wikistreamkotlin.controller.dto.EmailExistsResponse
-import com.redspace.wikistreamkotlin.controller.dto.LoginRequest
-import com.redspace.wikistreamkotlin.controller.dto.LogoutResponse
-import com.redspace.wikistreamkotlin.controller.dto.RegisterRequest
-import com.redspace.wikistreamkotlin.controller.dto.RegisterResponse
-import com.redspace.wikistreamkotlin.controller.dto.TokenResponse
+import com.redspace.wikistreamkotlin.controller.dto.*
 import com.redspace.wikistreamkotlin.service.AuthService
 import jakarta.validation.Valid
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -13,13 +8,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.validation.annotation.Validated
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
-import org.springframework.web.bind.annotation.ResponseStatus
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/v1/auth")
@@ -28,16 +17,6 @@ import org.springframework.web.bind.annotation.RestController
 class AuthController(
     private val authService: AuthService
 ) {
-
-    @GetMapping("/email-exists")
-    suspend fun emailExists(@RequestParam email: String): EmailExistsResponse {
-        val normalizedEmail = email.trim().lowercase()
-        return EmailExistsResponse(
-            email = normalizedEmail,
-            exists = authService.emailExists(normalizedEmail)
-        )
-    }
-
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
     suspend fun register(@Valid @RequestBody request: RegisterRequest): RegisterResponse =
@@ -53,4 +32,3 @@ class AuthController(
         return LogoutResponse(message = "Logged out successfully")
     }
 }
-

@@ -5,11 +5,6 @@ import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 import java.time.Instant
 
-data class EmailExistsResponse(
-	val email: String,
-	val exists: Boolean
-)
-
 data class RegisterRequest(
 	@field:Email
 	@field:NotBlank

@@ -1,4 +1,15 @@
 services:
+  redis:
+    image: redis:7
+    container_name: wikistream-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
   cassandra:
     container_name: wikistreamkotlin-cassandra
     image: cassandra:5.0
@@ -34,6 +45,8 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
+      redis:
+        condition: service_healthy
       cassandra-init:
         condition: service_completed_successfully
     environment:
@@ -45,6 +58,10 @@ services:
       CASSANDRA_PORT: 9042
       CASSANDRA_KEYSPACE_NAME: wikistream
       CASSANDRA_LOCAL_DATACENTER: datacenter1
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_TIMEOUT: 2000ms
+      APP_SESSION_BACKEND: redis
 
     ports:
       - "7000:7000"

@@ -1,7 +1,6 @@
 package com.redspace.wikistreamkotlin.controller
 
 import com.redspace.wikistreamkotlin.domain.StatsSnapshot
-import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.service.StatsService
 import org.springframework.security.core.annotation.AuthenticationPrincipal

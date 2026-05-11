@@ -1,23 +1,58 @@
 package com.redspace.wikistreamkotlin.service
 
+import com.redspace.wikistreamkotlin.repository.SessionRepository
+import com.redspace.wikistreamkotlin.security.JwtSecurityProperties
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import java.util.concurrent.ConcurrentHashMap
+import java.time.Instant
 
 @Service
-class ActiveUserSessionService {
-    private val activeUsers = ConcurrentHashMap.newKeySet<String>()
+class ActiveUserSessionService(
+    private val sessionRepository: SessionRepository,
+    private val jwtSecurityProperties: JwtSecurityProperties,
+    @Value($$"${app.instance-id:${HOSTNAME:unknown}}") private val instanceId: String,
+) {
 
-    fun markLoggedIn(email: String) {
-        activeUsers.add(email)
+    fun markLoggedIn(email: String, sessionMetadata: Map<String, String> = emptyMap()) {
+        sessionRepository.markLoggedIn(email, buildSessionMetadata(sessionMetadata))
     }
 
     fun markLoggedOut(email: String?) {
         if (email.isNullOrBlank()) {
             return
         }
-        activeUsers.remove(email)
+        sessionRepository.markLoggedOut(email)
     }
 
-    fun listActiveUsers(): Set<String> = activeUsers.toSet()
-}
+    fun listActiveUsers(): Set<String> = sessionRepository.listActiveEmails()
 
+    private fun buildSessionMetadata(additionalMetadata: Map<String, String>): Map<String, String> {
+        val now = Instant.now()
+        val expiresAt = now.plusSeconds(jwtSecurityProperties.accessTokenTtlSeconds)
+
+        val baseMetadata = mapOf(
+            SessionRepository.SessionMetadataKeys.LOGIN_AT to now.toString(),
+            SessionRepository.SessionMetadataKeys.EXPIRES_AT to expiresAt.toString(),
+            SessionRepository.SessionMetadataKeys.INSTANCE_ID to instanceId,
+            SessionRepository.SessionMetadataKeys.SOURCE to DEFAULT_SOURCE,
+        )
+
+        return baseMetadata + additionalMetadata
+            .filterKeys { it in SUPPORTED_SESSION_METADATA_KEYS }
+    }
+
+    companion object {
+        private const val DEFAULT_SOURCE = "backend"
+
+        private val SUPPORTED_SESSION_METADATA_KEYS = setOf(
+            SessionRepository.SessionMetadataKeys.JTI,
+            SessionRepository.SessionMetadataKeys.LOGIN_AT,
+            SessionRepository.SessionMetadataKeys.EXPIRES_AT,
+            SessionRepository.SessionMetadataKeys.INSTANCE_ID,
+            SessionRepository.SessionMetadataKeys.CLIENT_IP,
+            SessionRepository.SessionMetadataKeys.USER_AGENT,
+            SessionRepository.SessionMetadataKeys.DEVICE_ID,
+            SessionRepository.SessionMetadataKeys.SOURCE,
+        )
+    }
+}

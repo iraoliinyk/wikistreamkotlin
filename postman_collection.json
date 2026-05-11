@@ -42,48 +42,6 @@
       ]
     },
     {
-      "name": "Email Exists Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{BASE_URL}}/v1/auth/email-exists?email={{TEST_EMAIL}}",
-          "host": [
-            "{{BASE_URL}}"
-          ],
-          "path": [
-            "v1",
-            "auth",
-            "email-exists"
-          ],
-          "query": [
-            {
-              "key": "email",
-              "value": "{{TEST_EMAIL}}"
-            }
-          ]
-        },
-        "description": "Check if email already exists in the system"
-      },
-      "response": [],
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Status is 200', function () {",
-              "    pm.response.to.have.status(200);",
-              "});",
-              "var jsonData = pm.response.json();",
-              "pm.collectionVariables.set('EMAIL_EXISTS', jsonData.exists);",
-              "console.log('Email exists:', jsonData.exists);"
-            ]
-          }
-        }
-      ]
-    },
-    {
       "name": "Register User",
       "request": {
         "method": "POST",
@@ -339,11 +297,6 @@
     },
     {
       "key": "EXPIRES_IN",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "EMAIL_EXISTS",
       "value": "",
       "type": "string"
     }

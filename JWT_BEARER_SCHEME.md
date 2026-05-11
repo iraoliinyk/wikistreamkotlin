@@ -48,7 +48,6 @@ eyJpc3MiOiJ3aWtpc3RyZWFta290bGluIiwic3ViIjoidXNlckBleGFtcGxlLmNvbSIsImp0aSI6InV1
 ```
 POST /v1/auth/register   →  Create account   (email + password)
 POST /v1/auth/login      →  Obtain JWT        (returns access_token + expires_in)
-GET  /v1/auth/email-exists → Check email availability
 GET  /v1/status          →  Health check
 ```
 

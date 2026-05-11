@@ -32,9 +32,9 @@ class AuthService(
     private val activeUserSessionService: ActiveUserSessionService
 ) {
 
-    suspend fun emailExists(rawEmail: String): Boolean = withContext(Dispatchers.IO) {
-        userAccountRepository.existsById(normalizeEmail(rawEmail))
-    }
+//    suspend fun emailExists(rawEmail: String): Boolean = withContext(Dispatchers.IO) {
+//        userAccountRepository.existsById(normalizeEmail(rawEmail))
+//    }
 
     suspend fun register(request: RegisterRequest): RegisterResponse = withContext(Dispatchers.IO) {
         val email = normalizeEmail(request.email)

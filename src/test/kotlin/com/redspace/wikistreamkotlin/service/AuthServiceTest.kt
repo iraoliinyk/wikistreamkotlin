@@ -113,27 +113,27 @@ class AuthServiceTest {
     }
 
     // -------------------------------------------------- emailExists --------------------------------------------------
-
-    @Test
-    fun `emailExists returns true when user is registered`() = runBlocking {
-        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
-
-        assertTrue(authService.emailExists("user@example.com"))
-    }
-
-    @Test
-    fun `emailExists returns false when user is not registered`() = runBlocking {
-        whenever(userRepo.existsById("unknown@example.com")).thenReturn(false)
-
-        assertEquals(false, authService.emailExists("unknown@example.com"))
-    }
-
-    @Test
-    fun `emailExists normalizes email before lookup`() = runBlocking {
-        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
-
-        assertTrue(authService.emailExists(" User@Example.COM "))
-    }
+//
+//    @Test
+//    fun `emailExists returns true when user is registered`() = runBlocking {
+//        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
+//
+//        assertTrue(authService.emailExists("user@example.com"))
+//    }
+//
+//    @Test
+//    fun `emailExists returns false when user is not registered`() = runBlocking {
+//        whenever(userRepo.existsById("unknown@example.com")).thenReturn(false)
+//
+//        assertEquals(false, authService.emailExists("unknown@example.com"))
+//    }
+//
+//    @Test
+//    fun `emailExists normalizes email before lookup`() = runBlocking {
+//        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
+//
+//        assertTrue(authService.emailExists(" User@Example.COM "))
+//    }
 
     // -------------------------------------------------- register edge cases --------------------------------------------------
 

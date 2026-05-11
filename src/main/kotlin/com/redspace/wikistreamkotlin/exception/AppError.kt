@@ -114,16 +114,6 @@ class AuthValidationError(
 	cause = cause
 )
 
-//class TokenRevokedError(
-//	message: String,
-//	cause: Throwable? = null
-//) : HttpAppError(
-//	type = "token_revoked_error",
-//	status = HttpStatus.UNAUTHORIZED,
-//	message = message,
-//	cause = cause
-//)
-
 class UnexpectedAppError(
 	message: String,
 	cause: Throwable? = null

@@ -11,8 +11,8 @@ Two Docker Compose files are provided:
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Local Cassandra + app (no Astra) |
-| `docker-compose.astra.yml` | App only, connected to DataStax Astra cloud Cassandra |
+| `docker-compose.yml` | Local Redis + local Cassandra + app |
+| `docker-compose.astra.yml` | Local Redis + app connected to DataStax Astra Cassandra |
 
 Sensitive Cassandra or Astra credentials must not be committed.
 Copy `config/cassandra-secrets.properties.template` to `config/cassandra-secrets.properties` and fill in real values.
@@ -41,7 +41,6 @@ Stats include:
 ### Auth
 | Method | Path | Auth required | Description |
 |---|---|---|---|
-| `GET` | `/v1/auth/email-exists?email=` | ❌ | Check if email is registered |
 | `POST` | `/v1/auth/register` | ❌ | Register with `{ email, password }` |
 | `POST` | `/v1/auth/login` | ❌ | Login and receive JWT Bearer token |
 | `POST` | `/v1/auth/logout` | ✅ Bearer token | Revoke current token |
@@ -65,7 +64,7 @@ Schema is defined in `src/main/resources/db/cassandra/schema.cql` and applied au
 
 ## Run with Docker Compose — Local Cassandra
 
-`docker-compose.yml` starts a local Cassandra 5.0 container, applies the schema, then starts the app.
+`docker-compose.yml` starts local Redis and Cassandra 5.0 containers, applies the schema, then starts the app.
 No external credentials required.
 
 **Step 1** — (Optional) create JWT auth secrets file:
@@ -104,6 +103,12 @@ curl http://localhost:7000/v1/status
 
 Expected response: `{ "status": "ok" }`
 
+Quick Redis session check (inside app container):
+
+```bash
+docker exec wikistreamkotlin ping -c 1 redis
+```
+
 **Step 4** — Stop and remove containers:
 
 ```bash
@@ -132,7 +137,7 @@ SELECT * FROM revoked_tokens LIMIT 20;
 
 ## Run with Docker Compose — DataStax Astra
 
-`docker-compose.astra.yml` starts the app only (no local Cassandra). All DB calls go to Astra cloud.
+`docker-compose.astra.yml` starts local Redis + app (no local Cassandra). All DB calls go to Astra cloud.
 The `config/` directory is mounted read-only into the container so secrets are never baked into the image.
 
 **Step 1** — Prepare secrets files:
@@ -185,10 +190,39 @@ docker compose -f docker-compose.astra.yml up --build -d
 curl http://localhost:7000/v1/status
 ```
 
+Optional Redis reachability check:
+
+```bash
+docker exec wikistreamkotlin ping -c 1 redis
+```
+
 **Step 7** — Stop:
 
 ```bash
 docker compose -f docker-compose.astra.yml down
+```
+
+---
+
+## Login and Stats Flow (Redis-backed sessions)
+
+Use this quick flow after either compose setup to verify auth + session + stats:
+
+```bash
+curl -X POST http://localhost:7000/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"local-flow@example.com","password":"StrongPass#123"}'
+
+curl -X POST http://localhost:7000/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"local-flow@example.com","password":"StrongPass#123"}'
+```
+
+Copy the returned access token into `ACCESS_TOKEN`, then request stats:
+
+```bash
+ACCESS_TOKEN="<paste-token-here>"
+curl http://localhost:7000/v1/stats -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
 ---
@@ -221,18 +255,17 @@ It covers all API calls in the correct order with automatic token extraction.
 Run requests in this order for a complete auth + stats flow:
 
 1. **Health Check** — verify app is reachable
-2. **Email Exists Check** — confirm email is not yet registered
-3. **Register User** — creates account (expects `201`)
-4. **Login** — returns and saves `ACCESS_TOKEN` automatically
-5. **Fetch Stats** — uses `Authorization: Bearer {{ACCESS_TOKEN}}`
-6. **Logout** — revokes token
-7. **Verify Revoked Token** — confirms re-use returns `401`
+2. **Register User** — creates account (expects `201`)
+3. **Login** — returns and saves `ACCESS_TOKEN` automatically
+4. **Fetch Stats** — uses `Authorization: Bearer {{ACCESS_TOKEN}}`
+5. **Logout** — revokes token
+6. **Verify Revoked Token** — confirms re-use returns `401`
 
 ### Run as collection
 
 1. Click the collection name in Postman
 2. Click the **▶ Run** button
-3. All 7 requests execute sequentially with pass/fail results
+3. All 6 requests execute sequentially with pass/fail results
 
 ### Reset between runs
 
