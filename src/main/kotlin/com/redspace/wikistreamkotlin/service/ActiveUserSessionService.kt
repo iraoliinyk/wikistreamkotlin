@@ -17,11 +17,11 @@ class ActiveUserSessionService(
         sessionRepository.markLoggedIn(email, buildSessionMetadata(sessionMetadata))
     }
 
-    fun markLoggedOut(email: String?) {
+    fun markLoggedOut(email: String?, sessionId: String? = null) {
         if (email.isNullOrBlank()) {
             return
         }
-        sessionRepository.markLoggedOut(email)
+        sessionRepository.markLoggedOut(email, sessionId?.trim()?.takeIf { it.isNotEmpty() })
     }
 
     fun listActiveUsers(): Set<String> = sessionRepository.listActiveEmails()

@@ -11,6 +11,7 @@ import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.exception.MissingTokenSubjectError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
+import com.redspace.wikistreamkotlin.repository.SessionRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.security.JwtTokenService
@@ -63,8 +64,12 @@ class AuthService(
             throw InvalidCredentialsError("Invalid email or password")
         }
 
-        activeUserSessionService.markLoggedIn(user.email)
-        jwtTokenService.createAccessToken(user.email)
+        val generatedToken = jwtTokenService.generateAccessToken(user.email)
+        activeUserSessionService.markLoggedIn(
+            user.email,
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to generatedToken.jti)
+        )
+        generatedToken.response
     }
 
     suspend fun logout(jwt: Jwt) = withContext(Dispatchers.IO) {
@@ -83,7 +88,7 @@ class AuthService(
                 revokedAt = Instant.now()
             )
         )
-        activeUserSessionService.markLoggedOut(subject)
+        activeUserSessionService.markLoggedOut(subject, jti)
     }
 
     private fun normalizeEmail(rawEmail: String): String {

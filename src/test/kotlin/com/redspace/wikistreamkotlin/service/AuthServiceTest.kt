@@ -8,9 +8,11 @@ import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
 import com.redspace.wikistreamkotlin.exception.MissingTokenSubjectError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
+import com.redspace.wikistreamkotlin.repository.SessionRepository
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
+import com.redspace.wikistreamkotlin.security.GeneratedAccessToken
 import com.redspace.wikistreamkotlin.security.JwtTokenService
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
@@ -71,14 +73,22 @@ class AuthServiceTest {
         val hash = passwordEncoder.encode("password123") ?: error("Password hash should not be null")
         whenever(userRepo.findById("user@example.com"))
             .thenReturn(Optional.of(UserAccount(email = "user@example.com", passwordHash = hash, active = true)))
-        whenever(jwtTokenService.createAccessToken("user@example.com"))
-            .thenReturn(TokenResponse(accessToken = "token", expiresIn = 3600))
+        whenever(jwtTokenService.generateAccessToken("user@example.com"))
+            .thenReturn(
+                GeneratedAccessToken(
+                    response = TokenResponse(accessToken = "token", expiresIn = 3600),
+                    jti = "jti-123",
+                )
+            )
 
         val response = authService.login(LoginRequest(email = "user@example.com", password = "password123"))
 
         assertEquals("token", response.accessToken)
         assertEquals(3600, response.expiresIn)
-        verify(activeUserSessionService).markLoggedIn("user@example.com")
+        verify(activeUserSessionService).markLoggedIn(
+            eq("user@example.com"),
+            eq(mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-123"))
+        )
     }
 
     @Test
@@ -110,7 +120,7 @@ class AuthServiceTest {
         val savedToken = revokedTokenCaptor.firstValue
         assertEquals("jti-123", savedToken.jti)
         assertEquals("user@example.com", savedToken.email)
-        verify(activeUserSessionService).markLoggedOut(same("user@example.com"))
+        verify(activeUserSessionService).markLoggedOut(same("user@example.com"), same("jti-123"))
     }
 
     // -------------------------------------------------- register edge cases --------------------------------------------------
@@ -200,7 +210,7 @@ class AuthServiceTest {
         }
 
         verify(revokedRepo, never()).save(any())
-        verify(activeUserSessionService, never()).markLoggedOut(anyOrNull())
+        verify(activeUserSessionService, never()).markLoggedOut(anyOrNull(), anyOrNull())
     }
 
     @Test
@@ -220,6 +230,6 @@ class AuthServiceTest {
         }
 
         verify(revokedRepo, never()).save(any())
-        verify(activeUserSessionService, never()).markLoggedOut(anyOrNull())
+        verify(activeUserSessionService, never()).markLoggedOut(anyOrNull(), anyOrNull())
     }
 }

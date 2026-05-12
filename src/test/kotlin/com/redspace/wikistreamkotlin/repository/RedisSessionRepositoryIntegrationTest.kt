@@ -69,6 +69,7 @@ class RedisSessionRepositoryIntegrationTest {
     @BeforeEach
     fun cleanRedis() {
         redisTemplate.keys("$KEY_PREFIX*").orEmpty().forEach { redisTemplate.delete(it) }
+        redisTemplate.keys("$SESSION_KEY_PREFIX*").orEmpty().forEach { redisTemplate.delete(it) }
     }
 
     @Test
@@ -79,6 +80,21 @@ class RedisSessionRepositoryIntegrationTest {
         assertTrue(sessionRepository.isActive(email))
 
         sessionRepository.markLoggedOut(email)
+        assertFalse(sessionRepository.isActive(email))
+    }
+
+    @Test
+    fun `markLoggedOut with jti keeps email active until the last Redis-backed session logs out`() {
+        val email = "alice@example.com"
+
+        sessionRepository.markLoggedIn(email, mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-1"))
+        sessionRepository.markLoggedIn(email, mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-2"))
+
+        sessionRepository.markLoggedOut(email, "jti-1")
+        assertTrue(sessionRepository.isActive(email))
+        assertEquals(setOf(email), sessionRepository.listActiveEmails())
+
+        sessionRepository.markLoggedOut(email, "jti-2")
         assertFalse(sessionRepository.isActive(email))
     }
 
@@ -129,6 +145,7 @@ class RedisSessionRepositoryIntegrationTest {
     companion object {
         private const val REDIS_PORT = 6379
         private const val KEY_PREFIX = "active-session:"
+        private const val SESSION_KEY_PREFIX = "active-session-jtis:"
 
         @JvmField
         val redis = GenericContainer("redis:7").withExposedPorts(REDIS_PORT).apply {

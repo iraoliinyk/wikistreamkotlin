@@ -27,8 +27,11 @@ interface SessionRepository {
      * Marks a user as logged out.
      *
      * @param email normalized user email.
+     * @param sessionId optional session identifier (typically JWT `jti`). When present,
+     * only that session should be removed. When absent, implementations may clear all
+     * sessions for the email.
      */
-    fun markLoggedOut(email: String?)
+    fun markLoggedOut(email: String?, sessionId: String? = null)
 
     /**
      * Checks whether a user currently has an active session.

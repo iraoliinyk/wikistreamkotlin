@@ -37,14 +37,19 @@ class JwtTokenService(
 ) {
 
     fun createAccessToken(email: String): TokenResponse {
+        return generateAccessToken(email).response
+    }
+
+    fun generateAccessToken(email: String): GeneratedAccessToken {
         val now = Instant.now()
         val expiresAt = now.plusSeconds(jwtSecurityProperties.accessTokenTtlSeconds)
+        val jti = UUID.randomUUID().toString()
         val claims = JwtClaimsSet.builder()
             .issuer(jwtSecurityProperties.issuer)
             .subject(email)
             .issuedAt(now)
             .expiresAt(expiresAt)
-            .id(UUID.randomUUID().toString())
+            .id(jti)
             // `scope` is the standard OAuth2/JWT claim for permissions; `stats:read`
             // follows resource:action format (`stats` = protected API resource, `read` = operation)
             // and is mapped by Spring Security to authority `SCOPE_stats:read`.
@@ -54,9 +59,12 @@ class JwtTokenService(
         val headers = JwsHeader.with(MacAlgorithm.HS256).build()
         val jwt = jwtEncoder.encode(JwtEncoderParameters.from(headers, claims))
 
-        return TokenResponse(
-            accessToken = jwt.tokenValue,
-            expiresIn = jwtSecurityProperties.accessTokenTtlSeconds
+        return GeneratedAccessToken(
+            response = TokenResponse(
+                accessToken = jwt.tokenValue,
+                expiresIn = jwtSecurityProperties.accessTokenTtlSeconds
+            ),
+            jti = jti,
         )
     }
 

@@ -80,6 +80,40 @@ class ActiveUserSessionServiceTest {
     }
 
     @Test
+    fun `markLoggedOut with jti keeps email active until the last session logs out`() {
+        service.markLoggedIn(
+            "alice@example.com",
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-1"),
+        )
+        service.markLoggedIn(
+            "alice@example.com",
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-2"),
+        )
+
+        service.markLoggedOut("alice@example.com", "jti-1")
+        assertTrue(service.listActiveUsers().contains("alice@example.com"))
+
+        service.markLoggedOut("alice@example.com", "jti-2")
+        assertFalse(service.listActiveUsers().contains("alice@example.com"))
+    }
+
+    @Test
+    fun `markLoggedOut without jti removes all sessions for the email`() {
+        service.markLoggedIn(
+            "alice@example.com",
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-1"),
+        )
+        service.markLoggedIn(
+            "alice@example.com",
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-2"),
+        )
+
+        service.markLoggedOut("alice@example.com")
+
+        assertFalse(service.listActiveUsers().contains("alice@example.com"))
+    }
+
+    @Test
     fun `markLoggedOut for non-registered email does nothing`() {
         service.markLoggedOut("ghost@example.com")
 
@@ -113,22 +147,39 @@ class ActiveUserSessionServiceTest {
     }
 
     private class FakeSessionRepository : SessionRepository {
-        private val activeEmails = linkedSetOf<String>()
+        private val activeSessions = linkedMapOf<String, MutableSet<String>>()
+        private val anonymousSessions = linkedMapOf<String, Int>()
         var lastLoginMetadata: Map<String, String> = emptyMap()
             private set
 
         override fun markLoggedIn(email: String, sessionMetadata: Map<String, String>) {
-            activeEmails.add(email)
+            val sessionId = sessionMetadata[SessionRepository.SessionMetadataKeys.JTI]
+            if (sessionId.isNullOrBlank()) {
+                anonymousSessions[email] = (anonymousSessions[email] ?: 0) + 1
+            } else {
+                activeSessions.computeIfAbsent(email) { linkedSetOf() }.add(sessionId)
+            }
             lastLoginMetadata = sessionMetadata
         }
 
-        override fun markLoggedOut(email: String?) {
+        override fun markLoggedOut(email: String?, sessionId: String?) {
             if (email.isNullOrBlank()) return
-            activeEmails.remove(email)
+            if (sessionId.isNullOrBlank()) {
+                activeSessions.remove(email)
+                anonymousSessions.remove(email)
+                return
+            }
+
+            activeSessions[email]?.remove(sessionId)
+            if (activeSessions[email].isNullOrEmpty()) {
+                activeSessions.remove(email)
+            }
         }
 
-        override fun isActive(email: String): Boolean = activeEmails.contains(email)
+        override fun isActive(email: String): Boolean =
+            !activeSessions[email].isNullOrEmpty() || (anonymousSessions[email] ?: 0) > 0
 
-        override fun listActiveEmails(): Set<String> = activeEmails.toSet()
+        override fun listActiveEmails(): Set<String> =
+            (activeSessions.keys + anonymousSessions.filterValues { it > 0 }.keys).toSet()
     }
 }
