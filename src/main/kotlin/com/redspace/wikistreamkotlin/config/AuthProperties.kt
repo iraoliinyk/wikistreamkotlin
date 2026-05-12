@@ -1,4 +1,8 @@
 package com.redspace.wikistreamkotlin.config
 
-class AuthProperties {
-}
+import org.springframework.boot.context.properties.ConfigurationProperties
+
+@ConfigurationProperties(prefix = "app.auth")
+data class AuthProperties(
+    val enabled: Boolean = true
+)

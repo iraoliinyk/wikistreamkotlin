@@ -1,6 +1,7 @@
 package com.redspace.wikistreamkotlin.security
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
@@ -22,6 +23,7 @@ import javax.crypto.spec.SecretKeySpec
 
 @Configuration
 @EnableWebFluxSecurity
+@ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 class SecurityConfig(
     private val jwtSecurityProperties: JwtSecurityProperties
 ) {
