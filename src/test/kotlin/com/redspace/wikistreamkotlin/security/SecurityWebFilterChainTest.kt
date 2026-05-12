@@ -1,12 +1,22 @@
 package com.redspace.wikistreamkotlin.security
 
 import com.redspace.wikistreamkotlin.WikistreamkotlinApplication
+import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
+import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
+import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.testsupport.NoOpStatsSnapshotCassandraRepositoryConfig
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.annotation.Bean
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient
 import org.springframework.test.web.reactive.server.WebTestClient
+import org.mockito.kotlin.any
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.whenever
+import java.util.Optional
 
 /**
  * Integration test that verifies security filter-chain rules defined in [SecurityConfig]:
@@ -18,11 +28,28 @@ import org.springframework.test.web.reactive.server.WebTestClient
  * no-op Cassandra stats repository keeps the full WebFlux context loadable without external services.
  */
 @SpringBootTest(
-    classes = [WikistreamkotlinApplication::class, NoOpStatsSnapshotCassandraRepositoryConfig::class],
+    classes = [
+        WikistreamkotlinApplication::class,
+        NoOpStatsSnapshotCassandraRepositoryConfig::class,
+        SecurityWebFilterChainTest.TestAuthRepositoryConfig::class,
+    ],
+    properties = ["app.auth.enabled=true"],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
 )
 @AutoConfigureWebTestClient
 class SecurityWebFilterChainTest {
+
+    @TestConfiguration
+    class TestAuthRepositoryConfig {
+        @Bean
+        fun userAccountRepository(): UserAccountCassandraRepository = mock()
+
+        @Bean
+        fun userAccountAtomicRepository(): UserAccountAtomicRepository = mock()
+
+        @Bean
+        fun revokedTokenRepository(): RevokedTokenCassandraRepository = mock()
+    }
 
 
     @Autowired
@@ -30,6 +57,14 @@ class SecurityWebFilterChainTest {
 
     @Autowired
     private lateinit var jwtTokenService: JwtTokenService
+
+    @Autowired
+    private lateinit var revokedTokenRepository: RevokedTokenCassandraRepository
+
+    @BeforeEach
+    fun setUp() {
+        whenever(revokedTokenRepository.findById(any())).thenReturn(Optional.empty())
+    }
 
     @Test
     fun `GET status endpoint is public and returns 200`() {

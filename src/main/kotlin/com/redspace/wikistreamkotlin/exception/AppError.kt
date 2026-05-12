@@ -114,6 +114,16 @@ class AuthValidationError(
 	cause = cause
 )
 
+class MissingTokenSubjectError(
+	message: String,
+	cause: Throwable? = null
+) : HttpAppError(
+	type = "missing_token_subject_error",
+	status = HttpStatus.BAD_REQUEST,
+	message = message,
+	cause = cause
+)
+
 class UnexpectedAppError(
 	message: String,
 	cause: Throwable? = null

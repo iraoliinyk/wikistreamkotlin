@@ -1,6 +1,7 @@
 package com.redspace.wikistreamkotlin.security
 
 import com.redspace.wikistreamkotlin.controller.dto.TokenResponse
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm
 import org.springframework.security.oauth2.jwt.JwsHeader
 import org.springframework.security.oauth2.jwt.Jwt
@@ -12,6 +13,7 @@ import java.time.Instant
 import java.util.UUID
 
 @Service
+@ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 /**
  * Creates and parses JWT access tokens for authenticated users.
  *

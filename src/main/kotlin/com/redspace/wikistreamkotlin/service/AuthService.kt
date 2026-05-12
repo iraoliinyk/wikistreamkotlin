@@ -8,6 +8,7 @@ import com.redspace.wikistreamkotlin.domain.RevokedToken
 import com.redspace.wikistreamkotlin.domain.UserAccount
 import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
+import com.redspace.wikistreamkotlin.exception.MissingTokenSubjectError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
@@ -69,17 +70,20 @@ class AuthService(
     suspend fun logout(jwt: Jwt) = withContext(Dispatchers.IO) {
         val jti = jwtTokenService.extractJti(jwt)
             ?: throw AuthValidationError("Token does not contain jti")
+        val subject = jwt.subject?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: throw MissingTokenSubjectError("Token does not contain subject")
 
         val expiresAt = jwt.expiresAt ?: Instant.now()
         revokedTokenRepository.save(
             RevokedToken(
                 jti = jti,
-                email = jwt.subject ?: "unknown",
+                email = subject,
                 expiresAt = expiresAt,
                 revokedAt = Instant.now()
             )
         )
-        activeUserSessionService.markLoggedOut(jwt.subject)
+        activeUserSessionService.markLoggedOut(subject)
     }
 
     private fun normalizeEmail(rawEmail: String): String {

@@ -6,6 +6,7 @@ import com.redspace.wikistreamkotlin.controller.dto.TokenResponse
 import com.redspace.wikistreamkotlin.domain.UserAccount
 import com.redspace.wikistreamkotlin.exception.AuthValidationError
 import com.redspace.wikistreamkotlin.exception.InvalidCredentialsError
+import com.redspace.wikistreamkotlin.exception.MissingTokenSubjectError
 import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
@@ -112,29 +113,6 @@ class AuthServiceTest {
         verify(activeUserSessionService).markLoggedOut(same("user@example.com"))
     }
 
-    // -------------------------------------------------- emailExists --------------------------------------------------
-//
-//    @Test
-//    fun `emailExists returns true when user is registered`() = runBlocking {
-//        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
-//
-//        assertTrue(authService.emailExists("user@example.com"))
-//    }
-//
-//    @Test
-//    fun `emailExists returns false when user is not registered`() = runBlocking {
-//        whenever(userRepo.existsById("unknown@example.com")).thenReturn(false)
-//
-//        assertEquals(false, authService.emailExists("unknown@example.com"))
-//    }
-//
-//    @Test
-//    fun `emailExists normalizes email before lookup`() = runBlocking {
-//        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
-//
-//        assertTrue(authService.emailExists(" User@Example.COM "))
-//    }
-
     // -------------------------------------------------- register edge cases --------------------------------------------------
 
     @Test
@@ -204,5 +182,44 @@ class AuthServiceTest {
         }
 
         verify(revokedRepo, never()).save(any())
+    }
+
+    @Test
+    fun `logout throws MissingTokenSubjectError when token subject is null`() {
+        val now = Instant.now()
+        val jwt = Jwt.withTokenValue("token")
+            .issuedAt(now)
+            .expiresAt(now.plusSeconds(3600))
+            .claim("jti", "jti-123")
+            .header("alg", "HS256")
+            .build()
+        whenever(jwtTokenService.extractJti(jwt)).thenReturn("jti-123")
+
+        assertThrows(MissingTokenSubjectError::class.java) {
+            runBlocking { authService.logout(jwt) }
+        }
+
+        verify(revokedRepo, never()).save(any())
+        verify(activeUserSessionService, never()).markLoggedOut(anyOrNull())
+    }
+
+    @Test
+    fun `logout throws MissingTokenSubjectError when token subject is blank`() {
+        val now = Instant.now()
+        val jwt = Jwt.withTokenValue("token")
+            .subject("   ")
+            .issuedAt(now)
+            .expiresAt(now.plusSeconds(3600))
+            .claim("jti", "jti-123")
+            .header("alg", "HS256")
+            .build()
+        whenever(jwtTokenService.extractJti(jwt)).thenReturn("jti-123")
+
+        assertThrows(MissingTokenSubjectError::class.java) {
+            runBlocking { authService.logout(jwt) }
+        }
+
+        verify(revokedRepo, never()).save(any())
+        verify(activeUserSessionService, never()).markLoggedOut(anyOrNull())
     }
 }
