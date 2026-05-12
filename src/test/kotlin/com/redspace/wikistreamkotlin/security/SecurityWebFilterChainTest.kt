@@ -1,5 +1,7 @@
 package com.redspace.wikistreamkotlin.security
 
+import com.redspace.wikistreamkotlin.WikistreamkotlinApplication
+import com.redspace.wikistreamkotlin.testsupport.NoOpStatsSnapshotCassandraRepositoryConfig
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -12,12 +14,16 @@ import org.springframework.test.web.reactive.server.WebTestClient
  * - protected endpoints require a valid Bearer JWT,
  * - an invalid/missing token is rejected with HTTP 401.
  *
- * The test application.properties excludes Cassandra autoconfiguration and uses the
- * in-memory stats repository, so the full WebFlux context loads without external services.
+ * The test application.properties excludes Cassandra autoconfiguration, and a test-only
+ * no-op Cassandra stats repository keeps the full WebFlux context loadable without external services.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    classes = [WikistreamkotlinApplication::class, NoOpStatsSnapshotCassandraRepositoryConfig::class],
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
 @AutoConfigureWebTestClient
 class SecurityWebFilterChainTest {
+
 
     @Autowired
     private lateinit var webTestClient: WebTestClient

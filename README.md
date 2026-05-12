@@ -142,7 +142,8 @@ Schema is defined in `src/main/resources/db/cassandra/schema.cql` and applied au
 `docker-compose.yml` starts local Redis and Cassandra 5.0 containers, applies the schema, then starts the app.
 No external credentials required.
 
-`APP_SESSION_BACKEND` comes from `.env` (single source of truth). Default in repo is `redis`.
+`APP_SESSION_BACKEND` comes from `.env` (single source of truth).
+Repo default is `APP_SESSION_BACKEND=redis`.
 
 **Step 1** — (Optional) create JWT auth secrets file:
 
@@ -163,13 +164,13 @@ app.security.jwt.access-token-ttl-seconds=3600
 **Step 2** — Start all services and build image:
 
 ```bash
-docker compose --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build
+docker compose up --build
 ```
 
 Run in detached mode:
 
 ```bash
-docker compose --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build -d
+docker compose up --build -d
 ```
 
 **Step 3** — Verify the app is running:
@@ -217,7 +218,8 @@ SELECT * FROM revoked_tokens LIMIT 20;
 `docker-compose.astra.yml` starts local Redis + app (no local Cassandra). All DB calls go to Astra cloud.
 The `config/` directory is mounted read-only into the container so secrets are never baked into the image.
 
-`APP_SESSION_BACKEND` comes from `.env` (single source of truth). Default in repo is `redis`.
+`APP_SESSION_BACKEND` comes from `.env` (single source of truth).
+Repo default is `APP_SESSION_BACKEND=redis`.
 
 **Step 1** — Prepare secrets files:
 
@@ -354,6 +356,7 @@ If you want to register a fresh email:
 - The next run will auto-generate a new unique email
 
 ---
+
 
 ## Run with Docker (image only)
 

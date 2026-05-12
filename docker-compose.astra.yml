@@ -24,12 +24,11 @@ services:
     volumes:
       - ./config:/app/config:ro
     environment:
-      APP_STATS_REPOSITORY_TYPE: cassandra
-      SPRING_PROFILES_ACTIVE: astra
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_TIMEOUT: 2000ms
       APP_SESSION_BACKEND: ${APP_SESSION_BACKEND}
+      APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
     ports:
       - "7000:7000"
     restart: unless-stopped

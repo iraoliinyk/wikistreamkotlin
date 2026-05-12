@@ -7,12 +7,10 @@ import com.redspace.wikistreamkotlin.exception.RepositoryWriteError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Repository
 
 @Repository
-@ConditionalOnProperty(name = ["app.stats.repository.type"], havingValue = "cassandra", matchIfMissing = true)
 class CassandraStatsRepository(
     private val statsSnapshotCassandraRepository: StatsSnapshotCassandraRepository
 ) : StatsRepository {
@@ -21,6 +19,7 @@ class CassandraStatsRepository(
         private const val MAX_SAVE_RETRIES = 3
     }
 
+    @Suppress("RECEIVER_NULLABILITY_MISMATCH_BASED_ON_JAVA_ANNOTATIONS")
     override suspend fun recordForUser(userEmail: String, event: WikiEvent) {
         try {
             withContext(Dispatchers.IO) {
@@ -55,6 +54,7 @@ class CassandraStatsRepository(
         }
     }
 
+    @Suppress("TYPE_MISMATCH_BASED_ON_JAVA_ANNOTATIONS")
     override suspend fun snapshotForUser(userEmail: String): StatsSnapshot {
         try {
             return withContext(Dispatchers.IO) {

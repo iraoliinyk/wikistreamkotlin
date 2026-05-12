@@ -1,6 +1,7 @@
 package com.redspace.wikistreamkotlin.repository
 
 import com.redspace.wikistreamkotlin.WikistreamkotlinApplication
+import com.redspace.wikistreamkotlin.testsupport.NoOpStatsSnapshotCassandraRepositoryConfig
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -21,7 +22,11 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.concurrent.TimeUnit
 
 @SpringBootTest(
-    classes = [WikistreamkotlinApplication::class, RedisSessionRepositoryIntegrationTest.TestRedisConfig::class],
+    classes = [
+        WikistreamkotlinApplication::class,
+        RedisSessionRepositoryIntegrationTest.TestRedisConfig::class,
+        NoOpStatsSnapshotCassandraRepositoryConfig::class,
+    ],
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = [
         "spring.main.web-application-type=none",
@@ -31,6 +36,7 @@ import java.util.concurrent.TimeUnit
 
 @Testcontainers
 class RedisSessionRepositoryIntegrationTest {
+
 
     @TestConfiguration
     class TestRedisConfig {
