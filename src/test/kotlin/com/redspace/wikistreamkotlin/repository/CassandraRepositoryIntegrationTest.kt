@@ -171,6 +171,22 @@ class CassandraRepositoryIntegrationTest {
         assertFalse(result.isPresent)
     }
 
+    @Test
+    fun `saveWithTtl expires revoked token automatically`() {
+        val token = RevokedToken(
+            jti = "jti-expiring-1",
+            email = "user@example.com",
+            expiresAt = Instant.now().plusSeconds(3600),
+            revokedAt = Instant.now(),
+        )
+
+        revokedTokenRepository.saveWithTtl(token, 1)
+        assertTrue(revokedTokenRepository.findById(token.jti).isPresent)
+
+        Thread.sleep(1500)
+        assertFalse(revokedTokenRepository.findById(token.jti).isPresent)
+    }
+
     // -------------------------------------------------- StatsSnapshotCassandraRepository --------------------------------------------------
 
     @Test

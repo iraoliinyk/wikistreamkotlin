@@ -21,6 +21,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
+import java.time.Duration
 import java.time.Instant
 
 @Service
@@ -79,14 +80,20 @@ class AuthService(
             ?.takeIf { it.isNotEmpty() }
             ?: throw MissingTokenSubjectError("Token does not contain subject")
 
-        val expiresAt = jwt.expiresAt ?: Instant.now()
-        revokedTokenRepository.save(
+        val now = Instant.now()
+        val expiresAt = jwt.expiresAt ?: now
+        val ttlSeconds = Duration.between(now, expiresAt)
+            .seconds
+            .coerceIn(1, Int.MAX_VALUE.toLong())
+            .toInt()
+        revokedTokenRepository.saveWithTtl(
             RevokedToken(
                 jti = jti,
                 email = subject,
                 expiresAt = expiresAt,
-                revokedAt = Instant.now()
-            )
+                revokedAt = now
+            ),
+            ttlSeconds
         )
         activeUserSessionService.markLoggedOut(subject, jti)
     }

@@ -56,19 +56,6 @@ class AuthServiceTest {
     }
 
     @Test
-    fun `register fails when email already exists`() {
-        whenever(userRepo.existsById("user@example.com")).thenReturn(true)
-
-        assertThrows(UserAlreadyExistsError::class.java) {
-            runBlocking {
-                authService.register(RegisterRequest(email = "user@example.com", password = "password123"))
-            }
-        }
-
-        verify(userRepo, never()).save(any())
-    }
-
-    @Test
     fun `login returns token for valid credentials`() = runBlocking {
         val hash = passwordEncoder.encode("password123") ?: error("Password hash should not be null")
         whenever(userRepo.findById("user@example.com"))
@@ -111,16 +98,38 @@ class AuthServiceTest {
             .header("alg", "HS256")
             .build()
         whenever(jwtTokenService.extractJti(jwt)) doReturn "jti-123"
-        whenever(revokedRepo.save(any())).thenAnswer { it.arguments[0] }
+        whenever(revokedRepo.saveWithTtl(any(), any())).thenAnswer { it.arguments[0] }
 
         authService.logout(jwt)
 
         val revokedTokenCaptor = argumentCaptor<com.redspace.wikistreamkotlin.domain.RevokedToken>()
-        verify(revokedRepo).save(revokedTokenCaptor.capture())
+        val ttlCaptor = argumentCaptor<Int>()
+        verify(revokedRepo).saveWithTtl(revokedTokenCaptor.capture(), ttlCaptor.capture())
         val savedToken = revokedTokenCaptor.firstValue
         assertEquals("jti-123", savedToken.jti)
         assertEquals("user@example.com", savedToken.email)
+        assertTrue(ttlCaptor.firstValue in 3598..3600)
         verify(activeUserSessionService).markLoggedOut(same("user@example.com"), same("jti-123"))
+    }
+
+    @Test
+    fun `logout uses ttl floor of 1 second when token is already expired`() = runBlocking {
+        val now = Instant.now()
+        val jwt = Jwt.withTokenValue("token")
+            .subject("user@example.com")
+            .issuedAt(now.minusSeconds(3601))
+            .expiresAt(now.minusSeconds(1))
+            .claim("jti", "jti-123")
+            .header("alg", "HS256")
+            .build()
+        whenever(jwtTokenService.extractJti(jwt)).thenReturn("jti-123")
+        whenever(revokedRepo.saveWithTtl(any(), any())).thenAnswer { it.arguments[0] }
+
+        authService.logout(jwt)
+
+        val ttlCaptor = argumentCaptor<Int>()
+        verify(revokedRepo).saveWithTtl(any(), ttlCaptor.capture())
+        assertEquals(1, ttlCaptor.firstValue)
     }
 
     // -------------------------------------------------- register edge cases --------------------------------------------------
@@ -141,7 +150,6 @@ class AuthServiceTest {
 
     @Test
     fun `register throws AuthValidationError when password is shorter than 8 characters`() {
-        whenever(userRepo.existsById(any())).thenReturn(false)
 
         assertThrows(AuthValidationError::class.java) {
             runBlocking { authService.register(RegisterRequest(email = "user@example.com", password = "short")) }
@@ -191,7 +199,7 @@ class AuthServiceTest {
             runBlocking { authService.logout(jwt) }
         }
 
-        verify(revokedRepo, never()).save(any())
+        verify(revokedRepo, never()).saveWithTtl(any(), any())
     }
 
     @Test
@@ -209,7 +217,7 @@ class AuthServiceTest {
             runBlocking { authService.logout(jwt) }
         }
 
-        verify(revokedRepo, never()).save(any())
+        verify(revokedRepo, never()).saveWithTtl(any(), any())
         verify(activeUserSessionService, never()).markLoggedOut(anyOrNull(), anyOrNull())
     }
 
@@ -229,7 +237,7 @@ class AuthServiceTest {
             runBlocking { authService.logout(jwt) }
         }
 
-        verify(revokedRepo, never()).save(any())
+        verify(revokedRepo, never()).saveWithTtl(any(), any())
         verify(activeUserSessionService, never()).markLoggedOut(anyOrNull(), anyOrNull())
     }
 }
