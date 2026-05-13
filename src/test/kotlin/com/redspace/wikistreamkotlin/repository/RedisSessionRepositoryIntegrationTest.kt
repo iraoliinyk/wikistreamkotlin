@@ -18,6 +18,7 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.serializer.StringRedisSerializer
 import org.testcontainers.containers.GenericContainer
+import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.concurrent.TimeUnit
 
@@ -142,15 +143,61 @@ class RedisSessionRepositoryIntegrationTest {
         assertTrue(ttlSeconds in 1..3600)
     }
 
+    @Test
+    fun `listActiveEmails returns correct set when SCAN spans multiple cursor pages`() {
+        // Insert enough sessions to force SCAN to make multiple round-trips
+        // (default SCAN count hint is 200, so 250+ ensures at least two pages)
+        val emails = (1..250).map { "user$it@example.com" }
+        emails.forEach { sessionRepository.markLoggedIn(it) }
+
+        val active = sessionRepository.listActiveEmails()
+
+        assertEquals(emails.toSet(), active)
+    }
+
+    @Test
+    fun `listActiveEmails excludes users that logged out during SCAN`() {
+        val alice = "alice@example.com"
+        val bob   = "bob@example.com"
+        val carol = "carol@example.com"
+
+        sessionRepository.markLoggedIn(alice)
+        sessionRepository.markLoggedIn(bob)
+        sessionRepository.markLoggedIn(carol)
+
+        sessionRepository.markLoggedOut(bob)
+
+        val active = sessionRepository.listActiveEmails()
+
+        assertTrue(active.contains(alice))
+        assertFalse(active.contains(bob))
+        assertTrue(active.contains(carol))
+        assertEquals(2, active.size)
+    }
+
+    @Test
+    fun `listActiveEmails does not include JTI-set keys`() {
+        val email = "jti-check@example.com"
+        sessionRepository.markLoggedIn(
+            email,
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-abc")
+        )
+
+        val active = sessionRepository.listActiveEmails()
+
+        // No entry should look like a raw Redis key or contain the JTI prefix
+        assertTrue(active.all { !it.startsWith("active-session-jtis:") })
+        assertTrue(active.contains(email))
+    }
+
     companion object {
         private const val REDIS_PORT = 6379
         private const val KEY_PREFIX = "active-session:"
         private const val SESSION_KEY_PREFIX = "active-session-jtis:"
 
         @JvmField
-        val redis = GenericContainer("redis:7").withExposedPorts(REDIS_PORT).apply {
-            start()
-
-        }
+        @Container
+        val redis: GenericContainer<*> = GenericContainer("redis:7")
+            .withExposedPorts(REDIS_PORT)
     }
 }

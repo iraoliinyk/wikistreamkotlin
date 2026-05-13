@@ -108,7 +108,7 @@ class SecurityConfig(
             // Routes authorization rules
             .authorizeExchange {
                 // Public GET endpoints (health + email check).
-                it.pathMatchers(HttpMethod.GET, "/v1/status", "/v1/auth/email-exists").permitAll()
+                it.pathMatchers(HttpMethod.GET, "/v1/status").permitAll()
                 // Public register/login endpoints
                 it.pathMatchers(HttpMethod.POST, "/v1/auth/register", "/v1/auth/login").permitAll()
                 // Everything else requires valid authentication

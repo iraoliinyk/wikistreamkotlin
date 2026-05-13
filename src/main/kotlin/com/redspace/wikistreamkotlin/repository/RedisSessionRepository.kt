@@ -3,6 +3,7 @@ package com.redspace.wikistreamkotlin.repository
 import com.redspace.wikistreamkotlin.security.JwtSecurityProperties
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.core.ScanOptions
 import org.springframework.stereotype.Repository
 import java.time.Duration
 import java.time.Instant
@@ -68,13 +69,31 @@ class RedisSessionRepository(
     }
 
     override fun listActiveEmails(): Set<String> {
-        return redisTemplate.keys("$KEY_PREFIX*")
-            .orEmpty()
+        return scanKeys("$KEY_PREFIX*")
             .filterNot { it.contains(SESSIONS_KEY_PREFIX) }
             .map { it.removePrefix(KEY_PREFIX) }
             .filter { isActive(it) }
             .toSet()
     }
+
+    /**
+     * Iterates over Redis keys matching [pattern] using the non-blocking SCAN cursor.
+     * [count] is a hint to Redis for how many elements to return per iteration;
+     * the actual number may differ, but it avoids a single large O(N) response.
+     */
+    private fun scanKeys(pattern: String, count: Long = 200): Set<String> {
+        val options = ScanOptions.scanOptions().match(pattern).count(count).build()
+        val matched = mutableSetOf<String>()
+        redisTemplate.execute { connection ->
+            connection.keyCommands().scan(options).use { cursor ->
+                cursor.forEach { keyBytes ->
+                    matched.add(keyBytes.toString(Charsets.UTF_8))
+                }
+            }
+        }
+        return matched
+    }
+
 
     private fun String.toRedisKey() = "$KEY_PREFIX$this"
 
