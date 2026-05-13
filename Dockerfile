@@ -18,6 +18,15 @@ RUN JAR_PATH=$(find build/libs -maxdepth 1 -type f -name "*-SNAPSHOT.jar" ! -nam
 FROM eclipse-temurin:24-jre
 WORKDIR /app
 
+# Install network utilities for debugging
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iputils-ping \
+    curl \
+    wget \
+    net-tools \
+    dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --system --uid 10001 spring
 USER spring
 

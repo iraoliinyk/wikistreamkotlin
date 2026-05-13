@@ -1,0 +1,326 @@
+{
+  "info": {
+    "name": "WikiStream Local API Tests",
+    "description": "Postman collection for testing WikiStream backend locally with Cassandra\nFeatures: User registration, login, stats retrieval, logout, token revocation checks",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/v1/status",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "v1",
+            "status"
+          ]
+        },
+        "description": "Quick health check endpoint"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test('Response is OK', function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.status).to.eql('ok');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Register User",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{TEST_EMAIL}}\",\n  \"password\": \"{{TEST_PASSWORD}}\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/v1/auth/register",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "v1",
+            "auth",
+            "register"
+          ]
+        },
+        "description": "Register a new user with email and password"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "    pm.test('User registered successfully', function () {",
+              "        pm.response.to.have.status(201);",
+              "    });",
+              "    var jsonData = pm.response.json();",
+              "    pm.test('Email matches', function () {",
+              "        pm.expect(jsonData.email).to.eql(pm.collectionVariables.get('TEST_EMAIL'));",
+              "    });",
+              "} else {",
+              "    pm.test('Email already exists (skip registration)', function () {",
+              "        pm.response.to.have.status(409);",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{TEST_EMAIL}}\",\n  \"password\": \"{{TEST_PASSWORD}}\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/v1/auth/login",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "v1",
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Login and get access token"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Login successful', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "var jsonData = pm.response.json();",
+              "pm.test('Access token present', function () {",
+              "    pm.expect(jsonData.accessToken).to.exist;",
+              "});",
+              "pm.test('Token type is Bearer', function () {",
+              "    pm.expect(jsonData.tokenType).to.eql('Bearer');",
+              "});",
+              "pm.collectionVariables.set('ACCESS_TOKEN', jsonData.accessToken);",
+              "pm.collectionVariables.set('EXPIRES_IN', jsonData.expiresIn);",
+              "console.log('Token obtained, expires in ' + jsonData.expiresIn + ' seconds');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fetch Stats (with token)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{ACCESS_TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/v1/stats",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "v1",
+            "stats"
+          ]
+        },
+        "description": "Fetch per-user stats snapshot for the authenticated user (requires auth)"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Stats retrieved successfully', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "var jsonData = pm.response.json();",
+              "pm.test('Stats has required fields', function () {",
+              "    pm.expect(jsonData.id).to.eql(pm.collectionVariables.get('TEST_EMAIL'));",
+              "    pm.expect(jsonData.totalMessages).to.exist;",
+              "    pm.expect(jsonData.distinctUsers).to.exist;",
+              "    pm.expect(jsonData.botCount).to.exist;",
+              "    pm.expect(jsonData.nonBotCount).to.exist;",
+              "    pm.expect(jsonData.countByServerUrl).to.exist;",
+              "});",
+              "console.log('Stats snapshot for ' + jsonData.id + ' with total messages: ' + jsonData.totalMessages);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{ACCESS_TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/v1/auth/logout",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "v1",
+            "auth",
+            "logout"
+          ]
+        },
+        "description": "Logout and revoke the access token"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Logout successful', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "var jsonData = pm.response.json();",
+              "pm.test('Logout message present', function () {",
+              "    pm.expect(jsonData.message).to.include('Logged out');",
+              "});",
+              "console.log('Token revoked successfully');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verify Revoked Token (expect 401)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{ACCESS_TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/v1/stats",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "v1",
+            "stats"
+          ]
+        },
+        "description": "Verify that the revoked token cannot access protected resources"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Revoked token returns 401', function () {",
+              "    pm.response.to.have.status(401);",
+              "});",
+              "console.log('✓ Token revocation works correctly');"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:7000",
+      "type": "string"
+    },
+    {
+      "key": "TEST_EMAIL",
+      "value": "local-test-@example.com",
+      "type": "string"
+    },
+    {
+      "key": "TEST_PASSWORD",
+      "value": "StrongPass#123",
+      "type": "string"
+    },
+    {
+      "key": "ACCESS_TOKEN",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "EXPIRES_IN",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Generate unique email ONCE per collection run — only when still on the default placeholder.",
+          "// The placeholder is 'local-test-@example.com' (no timestamp digits between '-' and '@').",
+          "// Once set to a real timestamped value it is intentionally NOT overwritten,",
+          "// so register and login use the same email.",
+          "const current = pm.collectionVariables.get('TEST_EMAIL') || '';",
+          "const isPlaceholder = !current || current === 'local-test-@example.com';",
+          "if (isPlaceholder) {",
+          "    const ts = Math.floor(Date.now() / 1000);",
+          "    const email = 'local-test-' + ts + '@example.com';",
+          "    pm.collectionVariables.set('TEST_EMAIL', email);",
+          "    console.log('Generated unique test email: ' + email);",
+          "}"
+        ]
+      }
+    }
+  ]
+}

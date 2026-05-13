@@ -25,7 +25,7 @@ class WikiStreamConsumer(
     private val appErrorLogger: AppErrorLogger
 ) {
 
-    companion object  {
+    companion object {
         private const val RETRY_DELAY_MS = 3_000L
     }
 
@@ -63,7 +63,7 @@ class WikiStreamConsumer(
     private suspend fun runConsumerLoop() {
         wikiStreamClient.streamEvents()
             .collect { event ->
-                statsService.record(event)
+                statsService.recordForActiveUsers(event)
             }
     }
 

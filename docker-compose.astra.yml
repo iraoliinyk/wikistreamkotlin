@@ -1,0 +1,34 @@
+services:
+  redis:
+    image: redis:7
+    container_name: wikistream-redis
+    profiles: ["redis"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  wikistreamkotlin:
+    container_name: wikistreamkotlin
+    image: wikistreamkotlin:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_TIMEOUT: 2000ms
+      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND}
+      APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
+    ports:
+      - "7000:7000"
+    restart: unless-stopped

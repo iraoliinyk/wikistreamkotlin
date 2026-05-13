@@ -10,8 +10,9 @@ object WikiEventMockFactory {
     fun createWikiEvent(
         id: Long = 123456789L,
         title: String = "Kotlin (programming language)",
-        user: String = "TestUser",
+        user: String? = "TestUser",
         bot: Boolean = false,
+        serverUrl: String? = "https://en.wikipedia.org",
         meta: WikiEventMeta = createWikiEventMeta()
     ): WikiEvent {
         return WikiEvent(
@@ -27,7 +28,7 @@ object WikiEventMockFactory {
             user = user,
             bot = bot,
             notifyUrl = "https://en.wikipedia.org/w/index.php?diff=123&oldid=122",
-            serverUrl = "https://en.wikipedia.org",
+            serverUrl = serverUrl,
             serverName = "en.wikipedia.org",
             serverScriptPath = "/w",
             wiki = "enwiki",
