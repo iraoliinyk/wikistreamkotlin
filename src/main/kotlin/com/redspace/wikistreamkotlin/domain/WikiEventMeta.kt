@@ -12,6 +12,6 @@ data class WikiEventMeta(
     val stream: String?,
     val dt: String?,
     val topic: String?,
-    val partition : String?,
-    val offset: Long?
+    val partition: String?,
+    val offset: Long?,
 )

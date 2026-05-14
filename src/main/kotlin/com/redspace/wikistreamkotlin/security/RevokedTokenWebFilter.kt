@@ -11,7 +11,6 @@ import reactor.core.publisher.Mono
 import reactor.core.scheduler.Schedulers
 import java.time.Instant
 
-@Component
 /**
  * Enforces JWT revocation in the WebFlux filter chain.
  *
@@ -27,16 +26,20 @@ import java.time.Instant
  * - Return `401 Unauthorized` when token is revoked and revocation is still active.
  * - Otherwise continue the filter chain.
  */
+@Component
 class RevokedTokenWebFilter(
-    private val revokedTokenCassandraRepository: RevokedTokenCassandraRepository?
+    private val revokedTokenCassandraRepository: RevokedTokenCassandraRepository?,
 ) : WebFilter {
-
-    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
+    override fun filter(
+        exchange: ServerWebExchange,
+        chain: WebFilterChain,
+    ): Mono<Void> {
         if (revokedTokenCassandraRepository == null) {
             return chain.filter(exchange)
         }
 
-        return exchange.getPrincipal<JwtAuthenticationToken>()
+        return exchange
+            .getPrincipal<JwtAuthenticationToken>()
             .flatMap { authentication ->
                 val jti = authentication.token.id
                 // if token has no jti, filter cannot check revocation, so it allows request
@@ -44,12 +47,14 @@ class RevokedTokenWebFilter(
                     return@flatMap Mono.just(true)
                 }
 
-                Mono.fromCallable {
-                    revokedTokenCassandraRepository.findById(jti).map { revokedToken ->
-                        !revokedToken.expiresAt.isAfter(Instant.now())
+                Mono
+                    .fromCallable {
+                        revokedTokenCassandraRepository
+                            .findById(jti)
+                            .map { revokedToken ->
+                                !revokedToken.expiresAt.isAfter(Instant.now())
+                            }.orElse(true)
                     }
-                        .orElse(true)
-                }
                     // Moves blocking call off event-loop thread to avoid WebFlux thread starvation.
                     // Thread starvation is a concurrency issue where a thread is perpetually
                     // denied necessary resources (like CPU time or locks) because "greedy" threads
@@ -57,8 +62,7 @@ class RevokedTokenWebFilter(
                     .subscribeOn(Schedulers.boundedElastic())
                     // Repository outages should bypass revocation checks rather than fail the request.
                     .onErrorReturn(true)
-            }
-            .defaultIfEmpty(true)
+            }.defaultIfEmpty(true)
             .flatMap { isAllowed ->
                 if (isAllowed) {
                     chain.filter(exchange)
@@ -69,4 +73,3 @@ class RevokedTokenWebFilter(
             }
     }
 }
-

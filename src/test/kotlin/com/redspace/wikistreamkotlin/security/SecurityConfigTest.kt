@@ -7,15 +7,15 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SecurityConfigTest {
-
-    private val validProperties = JwtSecurityProperties(
-        issuer = "test-issuer",
-        secret = "test-secret-minimum-32-chars-long",
-        accessTokenTtlSeconds = 3600L,
-    )
+    private val validProperties =
+        JwtSecurityProperties(
+            issuer = "test-issuer",
+            secret = "test-secret-minimum-32-chars-long",
+            accessTokenTtlSeconds = 3600L,
+        )
     private val config = SecurityConfig(validProperties)
 
-    // -------------------------------------------------- passwordEncoder --------------------------------------------------
+    // --- passwordEncoder ---
 
     @Test
     fun `passwordEncoder encodes a raw password`() {
@@ -40,31 +40,31 @@ class SecurityConfigTest {
 
     @Test
     fun `jwtEncoder builds successfully with secret of 32 bytes`() {
-        val props = JwtSecurityProperties(
-            issuer = "test",
-            secret = "12345678901234567890123456789012", // exactly 32 bytes
-            accessTokenTtlSeconds = 3600L,
-        )
+        val props =
+            JwtSecurityProperties(
+                issuer = "test",
+                secret = "12345678901234567890123456789012", // exactly 32 bytes
+                accessTokenTtlSeconds = 3600L,
+            )
         assertNotNull(SecurityConfig(props).jwtEncoder())
     }
 
     @Test
     fun `jwtEncoder throws IllegalArgumentException when secret is shorter than 32 bytes`() {
-        val shortSecretConfig = SecurityConfig(
-            JwtSecurityProperties(issuer = "test", secret = "too-short", accessTokenTtlSeconds = 60L)
-        )
+        val shortSecretConfig =
+            SecurityConfig(
+                JwtSecurityProperties(issuer = "test", secret = "too-short", accessTokenTtlSeconds = 60L),
+            )
 
         assertThrows(IllegalArgumentException::class.java) {
             shortSecretConfig.jwtEncoder()
         }
     }
 
-    // -------------------------------------------------- reactiveJwtDecoder --------------------------------------------------
+    // --- reactiveJwtDecoder ---
 
     @Test
     fun `reactiveJwtDecoder builds successfully with valid secret`() {
         assertNotNull(config.reactiveJwtDecoder())
     }
-
 }
-

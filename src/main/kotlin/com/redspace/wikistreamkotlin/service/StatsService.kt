@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service
 @Service
 class StatsService(
     private val statsRepository: StatsRepository,
-    private val activeUserSessionService: ActiveUserSessionService
+    private val activeUserSessionService: ActiveUserSessionService,
 ) {
     suspend fun recordForActiveUsers(event: WikiEvent) {
         try {
@@ -27,7 +27,7 @@ class StatsService(
         } catch (exception: Exception) {
             throw StatsRecordingError(
                 message = "Failed to record wiki event with id=${event.id} for active users",
-                cause = exception
+                cause = exception,
             )
         }
     }
@@ -42,7 +42,7 @@ class StatsService(
         } catch (exception: Exception) {
             throw StatsSnapshotError(
                 message = "Failed to fetch stats snapshot for user '$userEmail'",
-                cause = exception
+                cause = exception,
             )
         }
     }

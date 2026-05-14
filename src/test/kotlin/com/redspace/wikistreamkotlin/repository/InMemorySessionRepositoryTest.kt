@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 
 class InMemorySessionRepositoryTest {
-
     private val repository = InMemorySessionRepository()
 
     @Test
@@ -51,4 +50,3 @@ class InMemorySessionRepositoryTest {
         assertFalse(repository.listActiveEmails().contains(email))
     }
 }
-

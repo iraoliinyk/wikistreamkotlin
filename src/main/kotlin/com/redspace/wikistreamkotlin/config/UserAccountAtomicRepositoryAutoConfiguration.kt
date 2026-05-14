@@ -1,7 +1,6 @@
 package com.redspace.wikistreamkotlin.config
 
 import com.datastax.oss.driver.api.core.CqlSession
-import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepositoryImpl
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
@@ -23,9 +22,6 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration(after = [CassandraAutoConfiguration::class])
 @ConditionalOnBean(CqlSession::class)
 class UserAccountAtomicRepositoryAutoConfiguration {
-
     @Bean
-    fun userAccountAtomicRepository(cqlSession: CqlSession): UserAccountAtomicRepository =
-        UserAccountAtomicRepositoryImpl(cqlSession)
+    fun userAccountAtomicRepository(cqlSession: CqlSession) = UserAccountAtomicRepositoryImpl(cqlSession)
 }
-

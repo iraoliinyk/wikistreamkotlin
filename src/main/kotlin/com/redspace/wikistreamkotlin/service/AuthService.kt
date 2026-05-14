@@ -32,71 +32,82 @@ class AuthService(
     private val revokedTokenRepository: RevokedTokenCassandraRepository,
     private val passwordEncoder: PasswordEncoder,
     private val jwtTokenService: JwtTokenService,
-    private val activeUserSessionService: ActiveUserSessionService
+    private val activeUserSessionService: ActiveUserSessionService,
 ) {
-    suspend fun register(request: RegisterRequest): RegisterResponse = withContext(Dispatchers.IO) {
-        val email = normalizeEmail(request.email)
-        validatePassword(request.password)
+    suspend fun register(request: RegisterRequest): RegisterResponse =
+        withContext(Dispatchers.IO) {
+            val email = normalizeEmail(request.email)
+            validatePassword(request.password)
 
-       val passwordHash = passwordEncoder.encode(request.password)
-            ?: throw AuthValidationError("Password hashing failed")
+            val passwordHash =
+                passwordEncoder.encode(request.password)
+                    ?: throw AuthValidationError("Password hashing failed")
 
-        val now = Instant.now()
-        val account = UserAccount(
-        email = email,
-        passwordHash = passwordHash,
-        createdAt = now,
-        updatedAt = now,
-        active = true
-        )
-        val inserted = userAccountAtomicRepository.insertIfNotExists(account)
-        if (!inserted) {
-            throw UserAlreadyExistsError("User with email '$email' already exists")
-        }
-        RegisterResponse(email = account.email, createdAt = account.createdAt)
-    }
-
-    suspend fun login(request: LoginRequest): TokenResponse = withContext(Dispatchers.IO) {
-        val email = normalizeEmail(request.email)
-        val user = userAccountRepository.findById(email).orElse(null)
-            ?: throw InvalidCredentialsError("Invalid email or password")
-
-        if (!user.active || !passwordEncoder.matches(request.password, user.passwordHash)) {
-            throw InvalidCredentialsError("Invalid email or password")
+            val now = Instant.now()
+            val account =
+                UserAccount(
+                    email = email,
+                    passwordHash = passwordHash,
+                    createdAt = now,
+                    updatedAt = now,
+                    active = true,
+                )
+            val inserted = userAccountAtomicRepository.insertIfNotExists(account)
+            if (!inserted) {
+                throw UserAlreadyExistsError("User with email '$email' already exists")
+            }
+            RegisterResponse(email = account.email, createdAt = account.createdAt)
         }
 
-        val generatedToken = jwtTokenService.generateAccessToken(user.email)
-        activeUserSessionService.markLoggedIn(
-            user.email,
-            mapOf(SessionRepository.SessionMetadataKeys.JTI to generatedToken.jti)
-        )
-        generatedToken.response
-    }
+    suspend fun login(request: LoginRequest): TokenResponse =
+        withContext(Dispatchers.IO) {
+            val email = normalizeEmail(request.email)
+            val user =
+                userAccountRepository.findById(email).orElse(null)
+                    ?: throw InvalidCredentialsError("Invalid email or password")
 
-    suspend fun logout(jwt: Jwt) = withContext(Dispatchers.IO) {
-        val jti = jwtTokenService.extractJti(jwt)
-            ?: throw AuthValidationError("Token does not contain jti")
-        val subject = jwt.subject?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: throw MissingTokenSubjectError("Token does not contain subject")
+            if (!user.active || !passwordEncoder.matches(request.password, user.passwordHash)) {
+                throw InvalidCredentialsError("Invalid email or password")
+            }
 
-        val now = Instant.now()
-        val expiresAt = jwt.expiresAt ?: now
-        val ttlSeconds = Duration.between(now, expiresAt)
-            .seconds
-            .coerceIn(1, Int.MAX_VALUE.toLong())
-            .toInt()
-        revokedTokenRepository.saveWithTtl(
-            RevokedToken(
-                jti = jti,
-                email = subject,
-                expiresAt = expiresAt,
-                revokedAt = now
-            ),
-            ttlSeconds
-        )
-        activeUserSessionService.markLoggedOut(subject, jti)
-    }
+            val generatedToken = jwtTokenService.generateAccessToken(user.email)
+            activeUserSessionService.markLoggedIn(
+                user.email,
+                mapOf(SessionRepository.SessionMetadataKeys.JTI to generatedToken.jti),
+            )
+            generatedToken.response
+        }
+
+    suspend fun logout(jwt: Jwt) =
+        withContext(Dispatchers.IO) {
+            val jti =
+                jwtTokenService.extractJti(jwt)
+                    ?: throw AuthValidationError("Token does not contain jti")
+            val subject =
+                jwt.subject
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: throw MissingTokenSubjectError("Token does not contain subject")
+
+            val now = Instant.now()
+            val expiresAt = jwt.expiresAt ?: now
+            val ttlSeconds =
+                Duration
+                    .between(now, expiresAt)
+                    .seconds
+                    .coerceIn(1, Int.MAX_VALUE.toLong())
+                    .toInt()
+            revokedTokenRepository.saveWithTtl(
+                RevokedToken(
+                    jti = jti,
+                    email = subject,
+                    expiresAt = expiresAt,
+                    revokedAt = now,
+                ),
+                ttlSeconds,
+            )
+            activeUserSessionService.markLoggedOut(subject, jti)
+        }
 
     private fun normalizeEmail(rawEmail: String): String {
         val normalized = rawEmail.trim().lowercase()

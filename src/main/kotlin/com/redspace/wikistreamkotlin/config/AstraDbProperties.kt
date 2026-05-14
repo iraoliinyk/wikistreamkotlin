@@ -8,6 +8,5 @@ data class AstraDbProperties(
     val secureConnectBundle: String? = null,
     val clientId: String? = null,
     val clientSecret: String? = null,
-    val token: String? = null
+    val token: String? = null,
 )
-

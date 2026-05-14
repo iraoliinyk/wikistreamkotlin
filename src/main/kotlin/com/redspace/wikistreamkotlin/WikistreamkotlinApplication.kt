@@ -9,5 +9,5 @@ import org.springframework.boot.runApplication
 class WikistreamkotlinApplication
 
 fun main(args: Array<String>) {
-	runApplication<WikistreamkotlinApplication>(*args)
+    runApplication<WikistreamkotlinApplication>(*args)
 }

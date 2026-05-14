@@ -8,15 +8,16 @@ import org.junit.jupiter.api.Test
 import tools.jackson.databind.ObjectMapper
 
 class WikiEventParserTest {
-
-    private val parser = WikiEventParser(
-        objectMapper = ObjectMapper(),
-        appErrorLogger = AppErrorLogger()
-    )
+    private val parser =
+        WikiEventParser(
+            objectMapper = ObjectMapper(),
+            appErrorLogger = AppErrorLogger(),
+        )
 
     @Test
     fun `parseEvent parses a valid wikimedia payload`() {
-        val payload = """
+        val payload =
+            """
             {
               "schema": "mediawiki/recentchange/1.0.0",
               "meta": {
@@ -46,7 +47,7 @@ class WikiEventParserTest {
               "wiki": "enwiki",
               "parsedcomment": "updated"
             }
-        """.trimIndent()
+            """.trimIndent()
 
         val event = parser.parseEvent(payload)
 
@@ -63,4 +64,3 @@ class WikiEventParserTest {
         assertNull(event)
     }
 }
-

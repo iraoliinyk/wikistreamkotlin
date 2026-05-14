@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.data.redis.connection.RedisConnectionFactory
@@ -34,23 +34,19 @@ import java.util.concurrent.TimeUnit
         "app.session.backend=redis",
     ],
 )
-
 @Testcontainers
 class RedisSessionRepositoryIntegrationTest {
-
-
     @TestConfiguration
     class TestRedisConfig {
         @Bean
         @Primary
-        fun testRedisConnectionFactory(): RedisConnectionFactory {
-            return LettuceConnectionFactory(redis.host, redis.getMappedPort(REDIS_PORT))
-        }
+        @Suppress("MaxLineLength")
+        fun testRedisConnectionFactory(): RedisConnectionFactory = LettuceConnectionFactory(redis.host, redis.getMappedPort(REDIS_PORT))
 
         @Bean
         @Primary
-        fun testRedisTemplate(connectionFactory: RedisConnectionFactory): RedisTemplate<String, String> {
-            return RedisTemplate<String, String>().apply {
+        fun testRedisTemplate(connectionFactory: RedisConnectionFactory): RedisTemplate<String, String> =
+            RedisTemplate<String, String>().apply {
                 setConnectionFactory(connectionFactory)
                 keySerializer = StringRedisSerializer()
                 valueSerializer = StringRedisSerializer()
@@ -58,7 +54,6 @@ class RedisSessionRepositoryIntegrationTest {
                 hashValueSerializer = StringRedisSerializer()
                 afterPropertiesSet()
             }
-        }
     }
 
     @Autowired
@@ -116,12 +111,13 @@ class RedisSessionRepositoryIntegrationTest {
     @Test
     fun `markLoggedIn persists supported metadata, ignores unsupported keys, and sets loginAt`() {
         val email = "meta@example.com"
-        val metadata = mapOf(
-            SessionRepository.SessionMetadataKeys.JTI to "jti-123",
-            SessionRepository.SessionMetadataKeys.CLIENT_IP to "127.0.0.1",
-            SessionRepository.SessionMetadataKeys.SOURCE to "postman",
-            "unsupported" to "value",
-        )
+        val metadata =
+            mapOf(
+                SessionRepository.SessionMetadataKeys.JTI to "jti-123",
+                SessionRepository.SessionMetadataKeys.CLIENT_IP to "127.0.0.1",
+                SessionRepository.SessionMetadataKeys.SOURCE to "postman",
+                "unsupported" to "value",
+            )
 
         sessionRepository.markLoggedIn(email, metadata)
 
@@ -158,7 +154,7 @@ class RedisSessionRepositoryIntegrationTest {
     @Test
     fun `listActiveEmails excludes users that logged out during SCAN`() {
         val alice = "alice@example.com"
-        val bob   = "bob@example.com"
+        val bob = "bob@example.com"
         val carol = "carol@example.com"
 
         sessionRepository.markLoggedIn(alice)
@@ -180,7 +176,7 @@ class RedisSessionRepositoryIntegrationTest {
         val email = "jti-check@example.com"
         sessionRepository.markLoggedIn(
             email,
-            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-abc")
+            mapOf(SessionRepository.SessionMetadataKeys.JTI to "jti-abc"),
         )
 
         val active = sessionRepository.listActiveEmails()
@@ -197,7 +193,8 @@ class RedisSessionRepositoryIntegrationTest {
 
         @JvmField
         @Container
-        val redis: GenericContainer<*> = GenericContainer("redis:7")
-            .withExposedPorts(REDIS_PORT)
+        val redis: GenericContainer<*> =
+            GenericContainer("redis:7")
+                .withExposedPorts(REDIS_PORT)
     }
 }

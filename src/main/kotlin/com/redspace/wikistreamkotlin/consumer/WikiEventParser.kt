@@ -10,22 +10,22 @@ import tools.jackson.databind.ObjectMapper
 @Component
 class WikiEventParser(
     private val objectMapper: ObjectMapper,
-    private val appErrorLogger: AppErrorLogger
+    private val appErrorLogger: AppErrorLogger,
 ) {
-
-    fun parseEvent(sseLine: String): WikiEvent? {
-        return try {
+    @Suppress("MagicNumber")
+    fun parseEvent(sseLine: String): WikiEvent? =
+        try {
             objectMapper.readValue(sseLine, WikiEvent::class.java)
         } catch (exception: Exception) {
+            val maxLines = 200
             appErrorLogger.log(
                 WikiEventParsingError(
-                message = "Failed to parse Wikimedia event payload",
-                cause = exception
+                    message = "Failed to parse Wikimedia event payload",
+                    cause = exception,
                 ),
                 level = AppErrorLogLevel.WARN,
-                context = mapOf("payloadPreview" to sseLine.take(200))
+                context = mapOf("payloadPreview" to sseLine.take(maxLines)),
             )
             null
         }
-    }
 }

@@ -28,7 +28,7 @@ data class StatsSnapshot(
     val trackedUsers: Set<String> = emptySet(),
     @JsonIgnore
     @Version
-    val version: Long? = null
+    val version: Long? = null,
 ) {
     companion object {
         const val GLOBAL_ID = "global-stats"

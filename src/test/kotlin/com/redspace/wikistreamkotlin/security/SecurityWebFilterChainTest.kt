@@ -5,17 +5,17 @@ import com.redspace.wikistreamkotlin.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.testsupport.NoOpStatsSnapshotCassandraRepositoryConfig
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient
-import org.springframework.test.web.reactive.server.WebTestClient
+import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient
+import org.springframework.context.annotation.Bean
+import org.springframework.test.web.reactive.server.WebTestClient
 import java.util.Optional
 
 /**
@@ -34,11 +34,10 @@ import java.util.Optional
         SecurityWebFilterChainTest.TestAuthRepositoryConfig::class,
     ],
     properties = ["app.auth.enabled=true"],
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class SecurityWebFilterChainTest {
-
     @TestConfiguration
     class TestAuthRepositoryConfig {
         @Bean
@@ -50,7 +49,6 @@ class SecurityWebFilterChainTest {
         @Bean
         fun revokedTokenRepository(): RevokedTokenCassandraRepository = mock()
     }
-
 
     @Autowired
     private lateinit var webTestClient: WebTestClient
@@ -68,38 +66,45 @@ class SecurityWebFilterChainTest {
 
     @Test
     fun `GET status endpoint is public and returns 200`() {
-        webTestClient.get()
+        webTestClient
+            .get()
             .uri("/v1/status")
             .exchange()
-            .expectStatus().isOk
+            .expectStatus()
+            .isOk
     }
 
     @Test
     fun `GET stats without Authorization returns 401`() {
-        webTestClient.get()
+        webTestClient
+            .get()
             .uri("/v1/stats")
             .exchange()
-            .expectStatus().isUnauthorized
+            .expectStatus()
+            .isUnauthorized
     }
 
     @Test
     fun `GET stats with invalid Bearer token returns 401`() {
-        webTestClient.get()
+        webTestClient
+            .get()
             .uri("/v1/stats")
             .header("Authorization", "Bearer completely.invalid.token")
             .exchange()
-            .expectStatus().isUnauthorized
+            .expectStatus()
+            .isUnauthorized
     }
 
     @Test
     fun `GET stats with valid Bearer token returns 200`() {
         val token = jwtTokenService.createAccessToken("test@example.com").accessToken
 
-        webTestClient.get()
+        webTestClient
+            .get()
             .uri("/v1/stats")
             .header("Authorization", "Bearer $token")
             .exchange()
-            .expectStatus().isOk
+            .expectStatus()
+            .isOk
     }
 }
-

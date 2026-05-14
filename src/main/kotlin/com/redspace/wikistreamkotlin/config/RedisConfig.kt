@@ -9,22 +9,18 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.serializer.StringRedisSerializer
 
-
 @Configuration
 @ConditionalOnProperty(name = ["app.session.backend"], havingValue = "redis")
 class RedisConfig {
-
     @Bean
     fun connectionFactory(
         @Value("\${spring.data.redis.host:localhost}") redisHost: String,
         @Value("\${spring.data.redis.port:6379}") redisPort: Int,
-    ): LettuceConnectionFactory {
-        return LettuceConnectionFactory(redisHost, redisPort)
-    }
+    ): LettuceConnectionFactory = LettuceConnectionFactory(redisHost, redisPort)
 
     @Bean
-    fun redisTemplate(connectionFactory: RedisConnectionFactory): RedisTemplate<String, String> {
-        return RedisTemplate<String, String>().apply {
+    fun redisTemplate(connectionFactory: RedisConnectionFactory): RedisTemplate<String, String> =
+        RedisTemplate<String, String>().apply {
             setConnectionFactory(connectionFactory)
             keySerializer = StringRedisSerializer()
             valueSerializer = StringRedisSerializer()
@@ -32,5 +28,4 @@ class RedisConfig {
             hashValueSerializer = StringRedisSerializer()
             afterPropertiesSet()
         }
-    }
 }

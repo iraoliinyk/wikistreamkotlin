@@ -18,13 +18,13 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters
 import java.time.Instant
 
 class JwtTokenServiceTest {
-
     private val jwtEncoder: JwtEncoder = mock()
-    private val jwtSecurityProperties = JwtSecurityProperties(
-        issuer = "test-issuer",
-        secret = "test-secret-minimum-32-chars-long",
-        accessTokenTtlSeconds = 3600L,
-    )
+    private val jwtSecurityProperties =
+        JwtSecurityProperties(
+            issuer = "test-issuer",
+            secret = "test-secret-minimum-32-chars-long",
+            accessTokenTtlSeconds = 3600L,
+        )
     private val jwtTokenService = JwtTokenService(jwtEncoder, jwtSecurityProperties)
 
     @Test
@@ -138,11 +138,13 @@ class JwtTokenServiceTest {
     }
 
     private fun buildJwt(id: String?): Jwt {
-        val builder = Jwt.withTokenValue("token")
-            .header("alg", "HS256")
-            .subject("user@example.com")
-            .issuedAt(Instant.now())
-            .expiresAt(Instant.now().plusSeconds(3600))
+        val builder =
+            Jwt
+                .withTokenValue("token")
+                .header("alg", "HS256")
+                .subject("user@example.com")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
         if (id != null) builder.claim("jti", id)
         return builder.build()
     }

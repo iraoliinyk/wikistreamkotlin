@@ -7,7 +7,6 @@ import org.mockito.kotlin.whenever
 import kotlin.test.Test
 
 class SessionRepositoryTest {
-
     private val mockSessionRepository: SessionRepository = mock()
 
     @Test

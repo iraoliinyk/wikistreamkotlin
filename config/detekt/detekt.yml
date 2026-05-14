@@ -1,0 +1,13 @@
+# Detekt override config.
+# buildUponDefaultConfig = true in build.gradle.kts, so only delta rules are needed here.
+exceptions:
+  # Catching broad exception types is acceptable in this project (e.g. top-level error handlers).
+  TooGenericExceptionCaught:
+    active: false
+style:
+  # Functions with multiple throw sites are common in validation/auth code; disable globally.
+  ThrowsCount:
+    active: false
+  # Wildcard imports are used intentionally in test files and assertion blocks.
+  WildcardImport:
+    active: false
