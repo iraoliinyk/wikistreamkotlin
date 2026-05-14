@@ -387,3 +387,26 @@ For full failure diagnostics in terminal/CI logs:
 ```bash
 ./gradlew lintKotlin --stacktrace
 ```
+
+---
+
+## Test Tasks
+
+Run only unit tests:
+
+```bash
+./gradlew unitTest
+```
+
+Run only integration tests:
+
+```bash
+./gradlew integrationTest
+```
+
+Run both in sequence:
+
+```bash
+./gradlew unitTest integrationTest
+```
+

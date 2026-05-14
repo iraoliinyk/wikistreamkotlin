@@ -198,3 +198,4 @@ class RedisSessionRepositoryIntegrationTest {
                 .withExposedPorts(REDIS_PORT)
     }
 }
+

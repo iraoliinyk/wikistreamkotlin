@@ -19,7 +19,7 @@ interface RevokedTokenTtlRepository {
 class RevokedTokenTtlRepositoryImpl(
     private val cqlSession: CqlSession,
 ) : RevokedTokenTtlRepository {
-    private val insertWithTtlStatement: PreparedStatement =
+    private val insertWithTtlStatement: PreparedStatement by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         cqlSession.prepare(
             """
             INSERT INTO revoked_tokens (jti, email, expires_at, revoked_at)
@@ -27,6 +27,7 @@ class RevokedTokenTtlRepositoryImpl(
             USING TTL ?
             """.trimIndent(),
         )
+    }
 
     @Suppress("MagicNumber")
     override fun saveWithTtl(

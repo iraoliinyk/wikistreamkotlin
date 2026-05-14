@@ -6,6 +6,7 @@ import com.redspace.wikistreamkotlin.exception.UserAlreadyExistsError
 import com.redspace.wikistreamkotlin.repository.UserAccountCassandraRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -99,3 +100,4 @@ class AuthServiceIntegrationTest {
             assertEquals(true, userAccountRepository.existsById("race@example.com"))
         }
 }
+

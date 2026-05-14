@@ -57,6 +57,20 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+val integrationTestSourceSet = sourceSets.create("integrationTest") {
+    resources.srcDir("src/integrationTest/resources")
+    compileClasspath += sourceSets["main"].output + sourceSets["test"].output
+    runtimeClasspath += output + compileClasspath
+}
+
+configurations.named("integrationTestImplementation") {
+    extendsFrom(configurations["testImplementation"])
+}
+
+configurations.named("integrationTestRuntimeOnly") {
+    extendsFrom(configurations["testRuntimeOnly"])
+}
+
 kotlin {
     compilerOptions {
         freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
@@ -75,6 +89,27 @@ detekt {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.named<Test>("test") {
+    description = "Runs unit tests."
+}
+
+tasks.register<Test>("unitTest") {
+    group = "verification"
+    description = "Runs unit tests only."
+    useJUnitPlatform()
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+}
+
+tasks.register<Test>("integrationTest") {
+    group = "verification"
+    description = "Runs integration tests only."
+    useJUnitPlatform()
+    testClassesDirs = integrationTestSourceSet.output.classesDirs
+    classpath = integrationTestSourceSet.runtimeClasspath
+    shouldRunAfter("unitTest")
 }
 
 tasks.register("lintKotlin") {
