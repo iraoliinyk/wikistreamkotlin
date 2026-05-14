@@ -76,3 +76,22 @@ detekt {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+
+tasks.register("lintKotlin") {
+    group = "verification"
+    description = "Runs detekt static analysis and ktlint formatting checks. Fails the build on any violation."
+
+    dependsOn("detekt", "ktlintCheck")
+
+    doLast {
+        logger.lifecycle("✅ lintKotlin passed: detekt and ktlint reported no violations.")
+    }
+}
+
+// Always show full stacktraces when detekt or ktlint tasks run,
+// so violation locations and rule names are visible in CI logs.
+tasks.matching { it.name == "detekt" || it.name.startsWith("ktlint") }.configureEach {
+    doFirst {
+        gradle.startParameter.showStacktrace = ShowStacktrace.ALWAYS_FULL
+    }
+}

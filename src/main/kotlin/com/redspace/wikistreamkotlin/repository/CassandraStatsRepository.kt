@@ -52,7 +52,6 @@ class CassandraStatsRepository(
             throw exception
         } catch (error: RepositoryWriteError) {
             throw error
-            // TODO detekt The caught exception is too generic. Prefer catching specific exceptions to the case that is currently handled. [TooGenericExceptionCaught]
         } catch (exception: Exception) {
             throw RepositoryWriteError(
                 message = "Failed to record wiki event for user '$userEmail' in Cassandra",

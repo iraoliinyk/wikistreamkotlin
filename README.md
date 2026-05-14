@@ -371,3 +371,19 @@ Run the container (requires separate running Cassandra and env vars):
 ```bash
 docker run --rm -p 7000:7000 --name wikistreamkotlin wikistreamkotlin:latest
 ```
+
+---
+
+## Code Quality Checks
+
+Run detekt + ktlint together via the aggregated Gradle task:
+
+```bash
+./gradlew lintKotlin
+```
+
+For full failure diagnostics in terminal/CI logs:
+
+```bash
+./gradlew lintKotlin --stacktrace
+```

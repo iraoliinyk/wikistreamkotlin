@@ -48,7 +48,6 @@ class WikiStreamClient(
             require(properties.url.isNotBlank()) { "wiki.stream.url must not be blank" }
             require(properties.userAgent.isNotBlank()) { "wiki.stream.user-agent must not be blank" }
             URI(properties.url)
-            // todo: detekt The caught exception is too generic. Prefer catching specific exceptions to the case that is currently handled. [TooGenericExceptionCaught]
         } catch (exception: Exception) {
             throw WikiStreamConfigurationError(
                 message = "Invalid Wikimedia stream configuration",
