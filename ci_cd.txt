@@ -32,8 +32,8 @@ Any other registry credentials if needed
 
 Phase 2: Create GitHub Actions Workflow
 2.1 Workflow skeleton structure
-Name: Build, Test & Publish
-Trigger: on: [pull_request, push: {branches: [main]}]
+Name: Build, Test
+Trigger: on: [push, push: {branches: [ch-4]}]
 Runs-on: ubuntu-latest
 Permissions: contents: read, packages: write (for GHCR push)
 2.2 Workflow jobs (stages)
