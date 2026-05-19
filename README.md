@@ -5,7 +5,7 @@ Events are aggregated per authenticated user into a `StatsSnapshot` and stored i
 Each user sees only their own stats while logged in; stats stop updating after logout.
 
 # Read Me First
-This project requires Java 24, Kotlin and IntelliJ IDEA to run locally.
+This project requires Java 25, Kotlin and IntelliJ IDEA to run locally.
 
 Two Docker Compose files are provided:
 
@@ -42,8 +42,8 @@ Both `docker-compose.yml` and `docker-compose.astra.yml` read `APP_SESSION_BACKE
 ### Language & Runtime
 | Component | Version |
 |---|---|
-| Kotlin | 2.2.21 |
-| Java | 24 (Eclipse Temurin) |
+| Kotlin | 2.3.0 |
+| Java | 25 (Eclipse Temurin) |
 | Gradle | 9.x (Kotlin DSL) |
 
 ### Framework
@@ -90,7 +90,7 @@ Both `docker-compose.yml` and `docker-compose.astra.yml` read `APP_SESSION_BACKE
 ### Infrastructure
 | Component | Details |
 |---|---|
-| Docker | Multi-stage build (builder: JDK 24, runtime: JRE 24) |
+| Docker | Multi-stage build (builder: JDK 25 + Gradle cache, runtime: JRE 25 Alpine) |
 | Docker Compose | `docker-compose.yml` (local), `docker-compose.astra.yml` (Astra) |
 | Lettuce | Reactive Redis client (pooled, configurable host/port) |
 | kotlin-logging-jvm 2.0.11 | Structured logging facade |
@@ -359,6 +359,20 @@ If you want to register a fresh email:
 
 
 ## Run with Docker (image only)
+
+### Docker build flow
+
+The repository uses a multi-stage `Dockerfile`:
+
+1. **Builder stage (`eclipse-temurin:25-jdk`)**
+   - Uses the Gradle wrapper to build the Spring Boot fat jar
+   - Uses BuildKit cache mounts for `~/.gradle` to speed up repeated builds
+2. **Runtime stage (`eclipse-temurin:25-jre-alpine`)**
+   - Copies only the generated `app.jar`
+   - Runs as a non-root user (`uid 10001`)
+   - Keeps a minimal runtime footprint (no build toolchain)
+
+The `.dockerignore` excludes Git metadata, IDE files, build outputs, and test sources to keep build context small and deterministic.
 
 Build the application image without Docker Compose:
 

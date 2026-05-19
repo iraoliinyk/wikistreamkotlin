@@ -1,9 +1,14 @@
 .git
 .gitignore
+.github
 .gradle
 build
+**/build
 out
 .idea
 *.iml
 .DS_Store
+src/test
+src/integrationTest
+src/test/resources
 
