@@ -59,7 +59,6 @@ dependencies {
 
 val integrationTestSourceSet =
     sourceSets.create("integrationTest") {
-        resources.srcDir("src/integrationTest/resources")
         compileClasspath += sourceSets["main"].output + sourceSets["test"].output
         runtimeClasspath += output + compileClasspath
     }
@@ -90,6 +89,7 @@ detekt {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    jvmArgs("--enable-native-access=ALL-UNNAMED", "--sun-misc-unsafe-memory-access=allow", "-Xshare:off")
 }
 
 tasks.named<Test>("test") {

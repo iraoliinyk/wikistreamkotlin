@@ -124,4 +124,3 @@ class UserAccountAtomicRepositoryIntegrationTest {
             assertEquals(1L, userAccountRepository.count())
         }
 }
-

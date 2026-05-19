@@ -100,4 +100,3 @@ class AuthServiceIntegrationTest {
             assertEquals(true, userAccountRepository.existsById("race@example.com"))
         }
 }
-

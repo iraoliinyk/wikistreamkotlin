@@ -1,5 +1,9 @@
 name: Build, Test
 run-name: Build and test on ${{ github.ref_name }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches:
@@ -13,8 +17,8 @@ jobs:
   lintKotlin:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -25,8 +29,8 @@ jobs:
   unitTest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -37,16 +41,15 @@ jobs:
   integrationTest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
           cache: gradle
-      - name: Start dependencies for integration tests
-        run: docker compose up -d
       - name: Run integration tests
+        env:
+          APP_JWT_ISSUER: wikistreamkotlin-ci
+          APP_JWT_SECRET: wikistreamkotlin-ci-secret-at-least-32-chars
+          APP_JWT_ACCESS_TOKEN_TTL_SECONDS: "3600"
         run: ./gradlew integrationTest
-      - name: Tear down dependencies
-        if: always()
-        run: docker compose down
