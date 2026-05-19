@@ -57,11 +57,12 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-val integrationTestSourceSet = sourceSets.create("integrationTest") {
-    resources.srcDir("src/integrationTest/resources")
-    compileClasspath += sourceSets["main"].output + sourceSets["test"].output
-    runtimeClasspath += output + compileClasspath
-}
+val integrationTestSourceSet =
+    sourceSets.create("integrationTest") {
+        resources.srcDir("src/integrationTest/resources")
+        compileClasspath += sourceSets["main"].output + sourceSets["test"].output
+        runtimeClasspath += output + compileClasspath
+    }
 
 configurations.named("integrationTestImplementation") {
     extendsFrom(configurations["testImplementation"])
@@ -127,11 +128,12 @@ tasks.register("ciTest") {
 // ---------------------------------------------------------------------------
 tasks.register<Test>("integrationTest") {
     group = "ci"
-    description = """
+    description =
+        """
         Runs integration tests only.
         ⚠️  Requires Docker and running Cassandra/Redis containers.
         Start them with: docker compose up -d
-    """.trimIndent()
+        """.trimIndent()
     useJUnitPlatform()
     testClassesDirs = integrationTestSourceSet.output.classesDirs
     classpath = integrationTestSourceSet.runtimeClasspath
@@ -143,14 +145,16 @@ tasks.register<Test>("integrationTest") {
 
     // Fail fast with a clear message when Docker is not available.
     doFirst {
-        val dockerAvailable = try {
-            val proc = ProcessBuilder("docker", "info")
-                .redirectErrorStream(true)
-                .start()
-            proc.waitFor() == 0
-        } catch (_: Exception) {
-            false
-        }
+        val dockerAvailable =
+            try {
+                val proc =
+                    ProcessBuilder("docker", "info")
+                        .redirectErrorStream(true)
+                        .start()
+                proc.waitFor() == 0
+            } catch (_: Exception) {
+                false
+            }
         require(dockerAvailable) {
             "integrationTest requires Docker. Please start Docker and run: docker compose up -d"
         }
