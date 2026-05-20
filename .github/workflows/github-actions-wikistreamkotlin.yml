@@ -61,6 +61,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Resolve image repository from docker-compose.astra.yml
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_image=$(awk '
+            /^[[:space:]]*wikistreamkotlin:[[:space:]]*$/ { in_service=1; next }
+            in_service && /^[[:space:]]*[a-zA-Z0-9_-]+:[[:space:]]*$/ { in_service=0 }
+            in_service && /^[[:space:]]*image:[[:space:]]*/ { print $2; exit }
+          ' docker-compose.astra.yml)
+
+          if [[ -z "${raw_image:-}" ]]; then
+            echo "Could not resolve image for service 'wikistreamkotlin' from docker-compose.astra.yml" >&2
+            exit 1
+          fi
+
+          image_no_tag="${raw_image%:*}"
+          if [[ "$image_no_tag" == "ghcr.io/"* ]]; then
+            image_repo="$image_no_tag"
+          else
+            image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${image_no_tag##*/}"
+          fi
+
+          echo "image_repo=$image_repo" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -75,7 +100,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/wikistreamkotlin
+          images: ${{ steps.image.outputs.image_repo }}
           tags: |
             type=raw,value=ch-4
             type=sha,prefix=sha-

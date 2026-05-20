@@ -265,7 +265,19 @@ Detached:
 docker compose -f docker-compose.astra.yml --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build -d
 ```
 
-**Step 6** — Verify:
+**Step 6** — Warm up Astra (recommended when DB may be hibernating):
+
+```bash
+bash scripts/astra-warmup-check.sh
+```
+
+Optional custom retry tuning:
+
+```bash
+BASE_URL=http://localhost:7000 MAX_ATTEMPTS=45 SLEEP_SECONDS=8 bash scripts/astra-warmup-check.sh
+```
+
+**Step 7** — Verify:
 
 ```bash
 curl http://localhost:7000/v1/status
@@ -277,7 +289,7 @@ Optional Redis reachability check:
 docker exec wikistreamkotlin ping -c 1 redis
 ```
 
-**Step 7** — Stop:
+**Step 8** — Stop:
 
 ```bash
 docker compose -f docker-compose.astra.yml down
@@ -423,4 +435,3 @@ Run both in sequence:
 ```bash
 ./gradlew unitTest integrationTest
 ```
-
