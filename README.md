@@ -398,6 +398,51 @@ Run the container (requires separate running Cassandra and env vars):
 docker run --rm -p 7000:7000 --name wikistreamkotlin wikistreamkotlin:latest
 ```
 
+### Test published image from GHCR
+
+Pull and run the image published by CI/CD (example tag: `ch-4`).
+
+**Astra mode (recommended for GHCR image validation):**
+
+1. Start local Redis:
+
+```bash
+docker run -d --name wikistream-redis -p 6379:6379 redis:7
+```
+
+2. Run the GHCR image with Astra profile and mounted config files:
+
+```bash
+docker run --rm -p 7000:7000 \
+  -v "$PWD/config:/app/config:ro" \
+  -e SPRING_PROFILES_ACTIVE=astra \
+  -e SPRING_DATA_REDIS_HOST=host.docker.internal \
+  -e SPRING_DATA_REDIS_PORT=6379 \
+  -e APP_SESSION_BACKEND=redis \
+  ghcr.io/iraoliinyk/wikistreamkotlin:ch-4
+```
+
+3. Verify app health:
+
+```bash
+curl http://localhost:7000/v1/status
+```
+
+4. If Astra is hibernating, run warm-up check:
+
+```bash
+bash scripts/astra-warmup-check.sh
+```
+
+5. Cleanup:
+
+```bash
+docker stop wikistream-redis
+docker rm wikistream-redis
+```
+
+> Note: Running `docker run ghcr.io/...` without Astra/local Cassandra configuration will fail because the app requires a reachable Cassandra backend at startup.
+
 ---
 
 ## Code Quality Checks
