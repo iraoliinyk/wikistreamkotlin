@@ -52,9 +52,9 @@ jobs:
           cache: gradle
       - name: Run integration tests
         env:
-          APP_JWT_ISSUER: wikistreamkotlin-ci
-          APP_JWT_SECRET: wikistreamkotlin-ci-secret-at-least-32-chars
-          APP_JWT_ACCESS_TOKEN_TTL_SECONDS: "3600"
+          APP_SECURITY_JWT_ISSUER: wikistreamkotlin-ci
+          APP_SECURITY_JWT_SECRET: wikistreamkotlin-ci-secret-at-least-32-chars
+          APP_SECURITY_JWT_ACCESS_TOKEN_TTL_SECONDS: "3600"
         run: ./gradlew integrationTest
 
   publishImage:

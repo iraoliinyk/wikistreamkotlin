@@ -480,6 +480,3 @@ Run both in sequence:
 ```bash
 ./gradlew unitTest integrationTest
 ```
-
-WIP-This line necessary only to verify CI/CD flow
-TBD remove 

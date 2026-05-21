@@ -17,14 +17,14 @@ class WikiEventParser(
         try {
             objectMapper.readValue(sseLine, WikiEvent::class.java)
         } catch (exception: Exception) {
-            val maxLines = 200
+            val maxChars = 200
             appErrorLogger.log(
                 WikiEventParsingError(
                     message = "Failed to parse Wikimedia event payload",
                     cause = exception,
                 ),
                 level = AppErrorLogLevel.WARN,
-                context = mapOf("payloadPreview" to sseLine.take(maxLines)),
+                context = mapOf("payloadPreview" to sseLine.take(maxChars)),
             )
             null
         }
