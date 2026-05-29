@@ -14,5 +14,5 @@ data class RevokedToken(
     @Column("expires_at")
     val expiresAt: Instant,
     @Column("revoked_at")
-    val revokedAt: Instant = Instant.now()
+    val revokedAt: Instant = Instant.now(),
 )

@@ -7,7 +7,6 @@ import java.nio.file.Path
 
 @Configuration
 class AstraDbConfig {
-
     @Bean
     fun astraCqlSessionBuilderCustomizer(properties: AstraDbProperties): CqlSessionBuilderCustomizer {
         return CqlSessionBuilderCustomizer { builder ->
@@ -15,12 +14,13 @@ class AstraDbConfig {
                 return@CqlSessionBuilderCustomizer
             }
 
-            val secureConnectBundle = properties.secureConnectBundle
-                ?.takeIf { it.isNotBlank() }
-                ?.let { Path.of(it) }
-                ?: throw IllegalStateException(
-                    "astra.db.secure-connect-bundle must be configured when the astra profile is enabled"
-                )
+            val secureConnectBundle =
+                properties.secureConnectBundle
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { Path.of(it) }
+                    ?: throw IllegalStateException(
+                        "astra.db.secure-connect-bundle must be configured when the astra profile is enabled",
+                    )
 
             builder.withCloudSecureConnectBundle(secureConnectBundle)
 
@@ -30,10 +30,9 @@ class AstraDbConfig {
                     builder.withAuthCredentials(properties.clientId, properties.clientSecret)
                 }
                 else -> throw IllegalStateException(
-                    "Provide either astra.db.token or astra.db.client-id + astra.db.client-secret"
+                    "Provide either astra.db.token or astra.db.client-id + astra.db.client-secret",
                 )
             }
         }
     }
 }
-

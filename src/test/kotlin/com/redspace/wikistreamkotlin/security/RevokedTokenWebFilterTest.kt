@@ -20,7 +20,6 @@ import java.time.Instant
 import java.util.Optional
 
 class RevokedTokenWebFilterTest {
-
     private val revokedTokenRepo: RevokedTokenCassandraRepository = mock()
     private val filter = RevokedTokenWebFilter(revokedTokenRepo)
 
@@ -30,7 +29,8 @@ class RevokedTokenWebFilterTest {
         val exchange: ServerWebExchange = mock()
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filterWithNullRepo.filter(exchange, chain))
+        StepVerifier
+            .create(filterWithNullRepo.filter(exchange, chain))
             .verifyComplete()
 
         verify(chain).filter(exchange)
@@ -42,7 +42,8 @@ class RevokedTokenWebFilterTest {
         whenever(exchange.getPrincipal<JwtAuthenticationToken>()).thenReturn(Mono.empty())
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filter.filter(exchange, chain))
+        StepVerifier
+            .create(filter.filter(exchange, chain))
             .verifyComplete()
 
         verify(chain).filter(exchange)
@@ -54,7 +55,8 @@ class RevokedTokenWebFilterTest {
         val exchange = exchangeWithAuth(jwt)
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filter.filter(exchange, chain))
+        StepVerifier
+            .create(filter.filter(exchange, chain))
             .verifyComplete()
 
         verify(chain).filter(exchange)
@@ -67,7 +69,8 @@ class RevokedTokenWebFilterTest {
         val exchange = exchangeWithAuth(jwt)
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filter.filter(exchange, chain))
+        StepVerifier
+            .create(filter.filter(exchange, chain))
             .verifyComplete()
 
         verify(chain).filter(exchange)
@@ -81,7 +84,8 @@ class RevokedTokenWebFilterTest {
         val exchange = exchangeWithAuth(jwt)
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filter.filter(exchange, chain))
+        StepVerifier
+            .create(filter.filter(exchange, chain))
             .verifyComplete()
 
         verify(chain).filter(exchange)
@@ -90,11 +94,12 @@ class RevokedTokenWebFilterTest {
     @Test
     fun `active revoked token returns 401 and completes response`() {
         val futureExpiry = Instant.now().plusSeconds(3600)
-        val revokedToken = RevokedToken(
-            jti = "jti-revoked",
-            email = "user@example.com",
-            expiresAt = futureExpiry,
-        )
+        val revokedToken =
+            RevokedToken(
+                jti = "jti-revoked",
+                email = "user@example.com",
+                expiresAt = futureExpiry,
+            )
         whenever(revokedTokenRepo.findById("jti-revoked")).thenReturn(Optional.of(revokedToken))
 
         val response: ServerHttpResponse = mock()
@@ -103,7 +108,8 @@ class RevokedTokenWebFilterTest {
         val exchange = exchangeWithAuth(jwt, response)
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filter.filter(exchange, chain))
+        StepVerifier
+            .create(filter.filter(exchange, chain))
             .verifyComplete()
 
         verify(response).setStatusCode(HttpStatus.UNAUTHORIZED)
@@ -113,18 +119,20 @@ class RevokedTokenWebFilterTest {
     @Test
     fun `expired revocation record is treated as not revoked and continues chain`() {
         val pastExpiry = Instant.now().minusSeconds(3600)
-        val expiredRevocation = RevokedToken(
-            jti = "jti-old",
-            email = "user@example.com",
-            expiresAt = pastExpiry,
-        )
+        val expiredRevocation =
+            RevokedToken(
+                jti = "jti-old",
+                email = "user@example.com",
+                expiresAt = pastExpiry,
+            )
         whenever(revokedTokenRepo.findById("jti-old")).thenReturn(Optional.of(expiredRevocation))
 
         val jwt = buildJwt(id = "jti-old")
         val exchange = exchangeWithAuth(jwt)
         val chain = chainThatCompletes()
 
-        StepVerifier.create(filter.filter(exchange, chain))
+        StepVerifier
+            .create(filter.filter(exchange, chain))
             .verifyComplete()
 
         verify(chain).filter(exchange)
@@ -133,11 +141,13 @@ class RevokedTokenWebFilterTest {
     // -------------------------------------------------- helpers --------------------------------------------------
 
     private fun buildJwt(id: String?): Jwt {
-        val builder = Jwt.withTokenValue("test-token")
-            .header("alg", "HS256")
-            .subject("user@example.com")
-            .issuedAt(Instant.now())
-            .expiresAt(Instant.now().plusSeconds(3600))
+        val builder =
+            Jwt
+                .withTokenValue("test-token")
+                .header("alg", "HS256")
+                .subject("user@example.com")
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(3600))
         if (id != null) builder.claim("jti", id)
         return builder.build()
     }
@@ -165,4 +175,3 @@ class RevokedTokenWebFilterTest {
         return chain
     }
 }
-

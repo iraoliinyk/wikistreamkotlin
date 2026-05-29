@@ -14,12 +14,17 @@ import java.util.concurrent.ConcurrentHashMap
 class InMemorySessionRepository : SessionRepository {
     private val activeSessions = ConcurrentHashMap<String, SessionState>()
 
-    override fun markLoggedIn(email: String, sessionMetadata: Map<String, String>) {
-        val expiresAt = sessionMetadata[SessionRepository.SessionMetadataKeys.EXPIRES_AT]
-            ?.let(Instant::parse)
-        val sessionId = sessionMetadata[SessionRepository.SessionMetadataKeys.JTI]
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
+    override fun markLoggedIn(
+        email: String,
+        sessionMetadata: Map<String, String>,
+    ) {
+        val expiresAt =
+            sessionMetadata[SessionRepository.SessionMetadataKeys.EXPIRES_AT]
+                ?.let(Instant::parse)
+        val sessionId =
+            sessionMetadata[SessionRepository.SessionMetadataKeys.JTI]
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
 
         activeSessions.compute(email) { _, existing ->
             val current = existing ?: SessionState()
@@ -33,7 +38,10 @@ class InMemorySessionRepository : SessionRepository {
         }
     }
 
-    override fun markLoggedOut(email: String?, sessionId: String?) {
+    override fun markLoggedOut(
+        email: String?,
+        sessionId: String?,
+    ) {
         if (email.isNullOrBlank()) return
 
         val normalizedSessionId = sessionId?.trim()?.takeIf { it.isNotEmpty() }

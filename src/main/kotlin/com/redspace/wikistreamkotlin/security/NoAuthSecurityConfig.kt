@@ -13,7 +13,6 @@ import org.springframework.security.web.server.SecurityWebFilterChain
 @EnableWebFluxSecurity
 @ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "false")
 class NoAuthSecurityConfig {
-
     @Bean
     fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
 
@@ -24,13 +23,12 @@ class NoAuthSecurityConfig {
      * Use case: Development, testing, or internal networks where auth is not required.
      */
     @Bean
-    fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
-        return http
+    fun securityWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain =
+        http
             .csrf { it.disable() }
             .httpBasic { it.disable() }
             .formLogin { it.disable() }
             .logout { it.disable() }
             .authorizeExchange { it.anyExchange().permitAll() }
             .build()
-    }
 }

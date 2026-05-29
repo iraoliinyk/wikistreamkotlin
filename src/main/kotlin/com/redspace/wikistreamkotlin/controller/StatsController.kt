@@ -11,11 +11,16 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/v1")
-class StatsController(private val statsService: StatsService) {
+class StatsController(
+    private val statsService: StatsService,
+) {
     @GetMapping("/stats")
-    suspend fun getStats(@AuthenticationPrincipal jwt: Jwt): StatsSnapshot {
-        val userEmail = jwt.subject?.takeIf { it.isNotBlank() }
-            ?: throw InvalidCredentialsError("JWT subject is missing")
+    suspend fun getStats(
+        @AuthenticationPrincipal jwt: Jwt,
+    ): StatsSnapshot {
+        val userEmail =
+            jwt.subject?.takeIf { it.isNotBlank() }
+                ?: throw InvalidCredentialsError("JWT subject is missing")
         return statsService.getSnapshotForUser(userEmail)
     }
 

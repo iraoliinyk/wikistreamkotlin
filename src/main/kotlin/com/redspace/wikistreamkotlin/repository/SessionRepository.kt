@@ -21,7 +21,10 @@ interface SessionRepository {
      * - [SessionMetadataKeys.DEVICE_ID] Device identifier for multi-device sessions.
      * - [SessionMetadataKeys.SOURCE] Client source such as web/mobile/postman.
      */
-    fun markLoggedIn(email: String, sessionMetadata: Map<String, String> = emptyMap())
+    fun markLoggedIn(
+        email: String,
+        sessionMetadata: Map<String, String> = emptyMap(),
+    )
 
     /**
      * Marks a user as logged out.
@@ -31,7 +34,10 @@ interface SessionRepository {
      * only that session should be removed. When absent, implementations may clear all
      * sessions for the email.
      */
-    fun markLoggedOut(email: String?, sessionId: String? = null)
+    fun markLoggedOut(
+        email: String?,
+        sessionId: String? = null,
+    )
 
     /**
      * Checks whether a user currently has an active session.

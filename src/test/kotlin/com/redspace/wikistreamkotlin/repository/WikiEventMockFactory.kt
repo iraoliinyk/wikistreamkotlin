@@ -6,16 +6,15 @@ import java.time.Instant
 import java.util.UUID
 
 object WikiEventMockFactory {
-
     fun createWikiEvent(
         id: Long = 123456789L,
         title: String = "Kotlin (programming language)",
         user: String? = "TestUser",
         bot: Boolean = false,
         serverUrl: String? = "https://en.wikipedia.org",
-        meta: WikiEventMeta = createWikiEventMeta()
-    ): WikiEvent {
-        return WikiEvent(
+        meta: WikiEventMeta = createWikiEventMeta(),
+    ): WikiEvent =
+        WikiEvent(
             schema = "mediawiki/recentchange/1.0.0",
             meta = meta,
             id = id,
@@ -32,16 +31,15 @@ object WikiEventMockFactory {
             serverName = "en.wikipedia.org",
             serverScriptPath = "/w",
             wiki = "enwiki",
-            parsedComment = "Fixed a typo in the introduction"
+            parsedComment = "Fixed a typo in the introduction",
         )
-    }
 
     fun createWikiEventMeta(
         requestId: String = UUID.randomUUID().toString(),
         domain: String = "en.wikipedia.org",
-        stream: String = "mediawiki.recentchange"
-    ): WikiEventMeta {
-        return WikiEventMeta(
+        stream: String = "mediawiki.recentchange",
+    ): WikiEventMeta =
+        WikiEventMeta(
             uri = "https://en.wikipedia.org/wiki/Main_Page",
             requestId = requestId,
             id = UUID.randomUUID().toString(),
@@ -50,7 +48,6 @@ object WikiEventMockFactory {
             dt = Instant.now().toString(),
             topic = "eqiad.mediawiki.recentchange",
             partition = "0",
-            offset = 1001L
+            offset = 1001L,
         )
-    }
 }

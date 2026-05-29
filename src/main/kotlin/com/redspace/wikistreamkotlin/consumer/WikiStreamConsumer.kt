@@ -22,9 +22,8 @@ import kotlin.time.Duration.Companion.milliseconds
 class WikiStreamConsumer(
     private val statsService: StatsService,
     private val wikiStreamClient: WikiStreamClient,
-    private val appErrorLogger: AppErrorLogger
+    private val appErrorLogger: AppErrorLogger,
 ) {
-
     companion object {
         private const val RETRY_DELAY_MS = 3_000L
     }
@@ -38,35 +37,36 @@ class WikiStreamConsumer(
             return
         }
 
-        consumerJob = consumerScope.launch {
-            while (true) {
-                try {
-                    runConsumerLoop()
-                } catch (exception: CancellationException) {
-                    throw exception
-                } catch (error: AppError) {
-                    appErrorLogger.log(error, context = mapOf("component" to "WikiStreamConsumer"))
-                } catch (exception: Exception) {
-                    appErrorLogger.log(
-                        UnexpectedAppError(
-                            message = "Unexpected error while consuming Wikimedia stream",
-                            cause = exception
-                        ),
-                        context = mapOf("component" to "WikiStreamConsumer")
-                    )
+        consumerJob =
+            consumerScope.launch {
+                while (true) {
+                    try {
+                        runConsumerLoop()
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (error: AppError) {
+                        appErrorLogger.log(error, context = mapOf("component" to "WikiStreamConsumer"))
+                    } catch (exception: Exception) {
+                        appErrorLogger.log(
+                            UnexpectedAppError(
+                                message = "Unexpected error while consuming Wikimedia stream",
+                                cause = exception,
+                            ),
+                            context = mapOf("component" to "WikiStreamConsumer"),
+                        )
+                    }
+                    delay(RETRY_DELAY_MS.milliseconds)
                 }
-                delay(RETRY_DELAY_MS.milliseconds)
             }
-        }
     }
 
     private suspend fun runConsumerLoop() {
-        wikiStreamClient.streamEvents()
+        wikiStreamClient
+            .streamEvents()
             .collect { event ->
                 statsService.recordForActiveUsers(event)
             }
     }
-
 
     @PreDestroy
     fun stop() {

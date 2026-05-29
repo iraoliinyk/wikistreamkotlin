@@ -12,8 +12,6 @@ import org.springframework.stereotype.Service
 import java.time.Instant
 import java.util.UUID
 
-@Service
-@ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 /**
  * Creates and parses JWT access tokens for authenticated users.
  *
@@ -29,45 +27,46 @@ import java.util.UUID
  * 3. The resulting compact JWT string is returned to clients for Bearer authentication.
  * 4. `extractJti(jwt)` exposes JWT ID for logout/revocation checks.
  */
+@Service
+@ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 class JwtTokenService(
     // Native Spring Security JWT encoder (typically NimbusJwtEncoder).
     private val jwtEncoder: JwtEncoder,
     // Application-specific JWT settings (issuer, TTL, secret-backed configuration).
-    private val jwtSecurityProperties: JwtSecurityProperties
+    private val jwtSecurityProperties: JwtSecurityProperties,
 ) {
-
-    fun createAccessToken(email: String): TokenResponse {
-        return generateAccessToken(email).response
-    }
+    fun createAccessToken(email: String): TokenResponse = generateAccessToken(email).response
 
     fun generateAccessToken(email: String): GeneratedAccessToken {
         val now = Instant.now()
         val expiresAt = now.plusSeconds(jwtSecurityProperties.accessTokenTtlSeconds)
         val jti = UUID.randomUUID().toString()
-        val claims = JwtClaimsSet.builder()
-            .issuer(jwtSecurityProperties.issuer)
-            .subject(email)
-            .issuedAt(now)
-            .expiresAt(expiresAt)
-            .id(jti)
-            // `scope` is the standard OAuth2/JWT claim for permissions; `stats:read`
-            // follows resource:action format (`stats` = protected API resource, `read` = operation)
-            // and is mapped by Spring Security to authority `SCOPE_stats:read`.
-            .claim("scope", "stats:read")
-            .build()
+        val claims =
+            JwtClaimsSet
+                .builder()
+                .issuer(jwtSecurityProperties.issuer)
+                .subject(email)
+                .issuedAt(now)
+                .expiresAt(expiresAt)
+                .id(jti)
+                // `scope` is the standard OAuth2/JWT claim for permissions; `stats:read`
+                // follows resource:action format (`stats` = protected API resource, `read` = operation)
+                // and is mapped by Spring Security to authority `SCOPE_stats:read`.
+                .claim("scope", "stats:read")
+                .build()
 
         val headers = JwsHeader.with(MacAlgorithm.HS256).build()
         val jwt = jwtEncoder.encode(JwtEncoderParameters.from(headers, claims))
 
         return GeneratedAccessToken(
-            response = TokenResponse(
-                accessToken = jwt.tokenValue,
-                expiresIn = jwtSecurityProperties.accessTokenTtlSeconds
-            ),
+            response =
+                TokenResponse(
+                    accessToken = jwt.tokenValue,
+                    expiresIn = jwtSecurityProperties.accessTokenTtlSeconds,
+                ),
             jti = jti,
         )
     }
 
     fun extractJti(jwt: Jwt): String? = jwt.id
 }
-

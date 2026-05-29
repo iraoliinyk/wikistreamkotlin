@@ -5,7 +5,11 @@ import com.redspace.wikistreamkotlin.domain.RevokedToken
 import com.redspace.wikistreamkotlin.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.domain.UserAccount
 import com.redspace.wikistreamkotlin.repository.CassandraRepositoryIntegrationTest.Companion.properties
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -38,11 +42,10 @@ import java.time.Instant
     properties = [
         "spring.autoconfigure.exclude=",
         "spring.main.web-application-type=none",
-    ]
+    ],
 )
 @Testcontainers
 class CassandraRepositoryIntegrationTest {
-
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = [UserAccount::class, RevokedToken::class, StatsSnapshot::class])
@@ -51,28 +54,31 @@ class CassandraRepositoryIntegrationTest {
             UserAccountCassandraRepository::class,
             RevokedTokenCassandraRepository::class,
             StatsSnapshotCassandraRepository::class,
-        ]
+        ],
     )
     class TestCassandraConfig
 
     companion object {
         @Container
         @JvmField
-        val cassandra: CassandraContainer = CassandraContainer("cassandra:5.0")
-            .withStartupTimeout(Duration.ofMinutes(3))
+        val cassandra: CassandraContainer =
+            CassandraContainer("cassandra:5.0")
+                .withStartupTimeout(Duration.ofMinutes(3))
 
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             // Create the keyspace using a raw CQL session BEFORE the Spring context
             // initializes, so that Spring Data Cassandra can connect with the keyspace name.
-            CqlSession.builder()
+            CqlSession
+                .builder()
                 .addContactPoint(cassandra.contactPoint)
                 .withLocalDatacenter(cassandra.localDatacenter)
-                .build().use { session ->
+                .build()
+                .use { session ->
                     session.execute(
                         "CREATE KEYSPACE IF NOT EXISTS wikistream " +
-                                "WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}"
+                            "WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
                     )
                 }
 
@@ -101,17 +107,18 @@ class CassandraRepositoryIntegrationTest {
         statsSnapshotRepository.deleteAll()
     }
 
-    // -------------------------------------------------- UserAccountCassandraRepository --------------------------------------------------
+    // --- UserAccountCassandraRepository ---
     @Test
     fun `save and findById returns persisted UserAccount`() {
         val now = Instant.now()
-        val account = UserAccount(
-            email = "alice@example.com",
-            passwordHash = "hashed-pw",
-            createdAt = now,
-            updatedAt = now,
-            active = true,
-        )
+        val account =
+            UserAccount(
+                email = "alice@example.com",
+                passwordHash = "hashed-pw",
+                createdAt = now,
+                updatedAt = now,
+                active = true,
+            )
 
         userAccountRepository.save(account)
 
@@ -144,17 +151,18 @@ class CassandraRepositoryIntegrationTest {
         assertFalse(userAccountRepository.existsById("carol@example.com"))
     }
 
-    // -------------------------------------------------- RevokedTokenCassandraRepository --------------------------------------------------
+    // --- RevokedTokenCassandraRepository ---
 
     @Test
     fun `save and findById returns persisted RevokedToken`() {
         val expiry = Instant.now().plusSeconds(3600)
-        val token = RevokedToken(
-            jti = "jti-test-1",
-            email = "user@example.com",
-            expiresAt = expiry,
-            revokedAt = Instant.now(),
-        )
+        val token =
+            RevokedToken(
+                jti = "jti-test-1",
+                email = "user@example.com",
+                expiresAt = expiry,
+                revokedAt = Instant.now(),
+            )
 
         revokedTokenRepository.save(token)
 
@@ -173,12 +181,13 @@ class CassandraRepositoryIntegrationTest {
 
     @Test
     fun `saveWithTtl expires revoked token automatically`() {
-        val token = RevokedToken(
-            jti = "jti-expiring-1",
-            email = "user@example.com",
-            expiresAt = Instant.now().plusSeconds(3600),
-            revokedAt = Instant.now(),
-        )
+        val token =
+            RevokedToken(
+                jti = "jti-expiring-1",
+                email = "user@example.com",
+                expiresAt = Instant.now().plusSeconds(3600),
+                revokedAt = Instant.now(),
+            )
 
         revokedTokenRepository.saveWithTtl(token, 1)
         assertTrue(revokedTokenRepository.findById(token.jti).isPresent)
@@ -187,19 +196,20 @@ class CassandraRepositoryIntegrationTest {
         assertFalse(revokedTokenRepository.findById(token.jti).isPresent)
     }
 
-    // -------------------------------------------------- StatsSnapshotCassandraRepository --------------------------------------------------
+    // --- StatsSnapshotCassandraRepository ---
 
     @Test
     fun `save and findById returns persisted StatsSnapshot`() {
-        val snapshot = StatsSnapshot(
-            id = "user@example.com",
-            totalMessages = 5,
-            distinctUsers = 2,
-            botCount = 1,
-            nonBotCount = 4,
-            countByServerUrl = mapOf("https://en.wikipedia.org" to 5),
-            trackedUsers = setOf("alice", "bob"),
-        )
+        val snapshot =
+            StatsSnapshot(
+                id = "user@example.com",
+                totalMessages = 5,
+                distinctUsers = 2,
+                botCount = 1,
+                nonBotCount = 4,
+                countByServerUrl = mapOf("https://en.wikipedia.org" to 5),
+                trackedUsers = setOf("alice", "bob"),
+            )
 
         statsSnapshotRepository.save(snapshot)
 
@@ -242,4 +252,3 @@ class CassandraRepositoryIntegrationTest {
         }
     }
 }
-

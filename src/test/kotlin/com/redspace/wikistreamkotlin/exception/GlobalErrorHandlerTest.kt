@@ -7,7 +7,6 @@ import org.springframework.http.HttpStatus
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 
 class GlobalErrorHandlerTest {
-
     private val handler = GlobalErrorHandler(AppErrorLogger())
 
     @Test
@@ -38,4 +37,3 @@ class GlobalErrorHandlerTest {
         assertNotNull(response.properties?.get("timestamp"))
     }
 }
-

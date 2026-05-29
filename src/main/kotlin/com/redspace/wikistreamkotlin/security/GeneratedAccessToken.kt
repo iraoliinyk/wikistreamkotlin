@@ -6,4 +6,3 @@ data class GeneratedAccessToken(
     val response: TokenResponse,
     val jti: String,
 )
-

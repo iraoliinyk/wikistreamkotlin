@@ -25,10 +25,13 @@ import javax.crypto.spec.SecretKeySpec
 @EnableWebFluxSecurity
 @ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 class SecurityConfig(
-    private val jwtSecurityProperties: JwtSecurityProperties
+    private val jwtSecurityProperties: JwtSecurityProperties,
 ) {
+    companion object {
+        /** Minimum key byte length required by HS256 (256 bits = 32 bytes). */
+        private const val HS256_MIN_KEY_BYTES = 32
+    }
 
-    @Bean
     /**
      * Provides the application password encoder.
      *
@@ -40,6 +43,7 @@ class SecurityConfig(
      * Other encoders (e.g., PBKDF2, SCrypt, Argon2) are also valid in specific environments,
      * but BCrypt offers a pragmatic security/compatibility baseline for this service.
      */
+    @Bean
     fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
 
     /**
@@ -51,11 +55,12 @@ class SecurityConfig(
     @Bean
     fun jwtEncoder(): JwtEncoder {
         val keyBytes = jwtSecurityProperties.secret.toByteArray(Charsets.UTF_8)
-        require(keyBytes.size >= 32) { "JWT secret must be at least 32 bytes for HS256" }
+        require(keyBytes.size >= HS256_MIN_KEY_BYTES) { "JWT secret must be at least 32 bytes for HS256" }
         // Builds Hash-based Message Authentication Code (HMAC) key object for signing algorithm
         val secretKey = SecretKeySpec(keyBytes, "HmacSHA256")
         // Returns Spring/Nimbus encoder that will sign JWTs with the shared secret
-        return org.springframework.security.oauth2.jwt.NimbusJwtEncoder(ImmutableSecret(secretKey))
+        return org.springframework.security.oauth2.jwt
+            .NimbusJwtEncoder(ImmutableSecret(secretKey))
     }
 
     /**
@@ -66,12 +71,13 @@ class SecurityConfig(
      */
     @Bean
     fun reactiveJwtDecoder(): ReactiveJwtDecoder {
-        //Uses same shared secret as encoder
+        // Uses same shared secret as encoder
         val keyBytes = jwtSecurityProperties.secret.toByteArray(Charsets.UTF_8)
         // Rebuilds HMAC key for verification
         val secretKey = SecretKeySpec(keyBytes, "HmacSHA256")
         // Configures decoder to verify HS256-signed tokens reactively (WebFlux compatible)
-        return NimbusReactiveJwtDecoder.withSecretKey(secretKey)
+        return NimbusReactiveJwtDecoder
+            .withSecretKey(secretKey)
             .macAlgorithm(MacAlgorithm.HS256)
             .build()
             .apply {
@@ -81,7 +87,6 @@ class SecurityConfig(
                 setJwtValidator(DelegatingOAuth2TokenValidator(withIssuer))
             }
     }
-
 
     /**
      * Configures the WebFlux security filter chain for API authentication and authorization.
@@ -96,7 +101,7 @@ class SecurityConfig(
     @Bean
     fun securityWebFilterChain(
         http: ServerHttpSecurity,
-        revokedTokenWebFilter: RevokedTokenWebFilter
+        revokedTokenWebFilter: RevokedTokenWebFilter,
     ): SecurityWebFilterChain {
         val jwtAuthConverter = JwtAuthenticationConverter()
         // Converter from JWT claims to Spring Authentication authorities/principal.
@@ -121,9 +126,9 @@ class SecurityConfig(
                     it.jwtAuthenticationConverter(ReactiveJwtAuthenticationConverterAdapter(jwtAuthConverter))
                 }
             }
-            // Runs RevokedTokenWebFilter after JWT authentication, so token is already parsed/validated and principal exists
+            // Runs RevokedTokenWebFilter after JWT authentication,
+            // so token is already parsed/validated and principal exists
             .addFilterAfter(revokedTokenWebFilter, SecurityWebFiltersOrder.AUTHENTICATION)
             .build()
     }
 }
-

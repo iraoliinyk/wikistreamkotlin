@@ -33,23 +33,25 @@ import java.util.concurrent.CountDownLatch
 )
 @Testcontainers
 class UserAccountAtomicRepositoryIntegrationTest {
-
     companion object {
         @Container
         @JvmField
-        val cassandra: CassandraContainer = CassandraContainer("cassandra:5.0")
-            .withStartupTimeout(Duration.ofMinutes(3))
+        val cassandra: CassandraContainer =
+            CassandraContainer("cassandra:5.0")
+                .withStartupTimeout(Duration.ofMinutes(3))
 
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
-            CqlSession.builder()
+            CqlSession
+                .builder()
                 .addContactPoint(cassandra.contactPoint)
                 .withLocalDatacenter(cassandra.localDatacenter)
-                .build().use { session ->
+                .build()
+                .use { session ->
                     session.execute(
                         "CREATE KEYSPACE IF NOT EXISTS wikistream " +
-                                "WITH replication = {'class':'SimpleStrategy','replication_factor':1}"
+                            "WITH replication = {'class':'SimpleStrategy','replication_factor':1}",
                     )
                     session.execute(
                         "CREATE TABLE IF NOT EXISTS wikistream.user_accounts (" +
@@ -57,7 +59,7 @@ class UserAccountAtomicRepositoryIntegrationTest {
                             "password_hash text," +
                             "created_at timestamp," +
                             "updated_at timestamp," +
-                            "active boolean)"
+                            "active boolean)",
                     )
                 }
 
@@ -84,12 +86,14 @@ class UserAccountAtomicRepositoryIntegrationTest {
     @Test
     fun `insertIfNotExists returns true then false for duplicate email`() {
         val now = Instant.now()
-        val first = userAccountAtomicRepository.insertIfNotExists(
-            UserAccount("race@example.com", "hash-1", now, now, true)
-        )
-        val second = userAccountAtomicRepository.insertIfNotExists(
-            UserAccount("race@example.com", "hash-2", now, now, true)
-        )
+        val first =
+            userAccountAtomicRepository.insertIfNotExists(
+                UserAccount("race@example.com", "hash-1", now, now, true),
+            )
+        val second =
+            userAccountAtomicRepository.insertIfNotExists(
+                UserAccount("race@example.com", "hash-2", now, now, true),
+            )
 
         assertTrue(first)
         assertEquals(false, second)
@@ -98,23 +102,25 @@ class UserAccountAtomicRepositoryIntegrationTest {
     }
 
     @Test
-    fun `concurrent insertIfNotExists yields exactly one applied`() = runBlocking {
-        val gate = CountDownLatch(1)
-        val attempts = (1..2).map { idx ->
-            async(Dispatchers.IO) {
-                gate.await()
-                val now = Instant.now()
-                userAccountAtomicRepository.insertIfNotExists(
-                    UserAccount("race@example.com", "hash-$idx", now, now, true)
-                )
-            }
+    fun `concurrent insertIfNotExists yields exactly one applied`() =
+        runBlocking {
+            val gate = CountDownLatch(1)
+            val attempts =
+                (1..2).map { idx ->
+                    async(Dispatchers.IO) {
+                        gate.await()
+                        val now = Instant.now()
+                        userAccountAtomicRepository.insertIfNotExists(
+                            UserAccount("race@example.com", "hash-$idx", now, now, true),
+                        )
+                    }
+                }
+
+            gate.countDown()
+            val results = coroutineScope { attempts.awaitAll() }
+
+            assertEquals(1, results.count { it })
+            assertEquals(1, results.count { !it })
+            assertEquals(1L, userAccountRepository.count())
         }
-
-        gate.countDown()
-        val results = coroutineScope { attempts.awaitAll() }
-
-        assertEquals(1, results.count { it })
-        assertEquals(1, results.count { !it })
-        assertEquals(1L, userAccountRepository.count())
-    }
 }

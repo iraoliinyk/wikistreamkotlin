@@ -25,7 +25,10 @@ out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 /build
-/gradle
+/gradle/*
+!/gradle/wrapper/
+!/gradle/wrapper/gradle-wrapper.jar
+!/gradle/wrapper/gradle-wrapper.properties
 
 ### NetBeans ###
 /nbproject/private/

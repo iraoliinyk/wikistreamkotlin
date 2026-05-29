@@ -10,13 +10,13 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 
 class ActiveUserSessionServiceTest {
-
     private val sessionRepository = FakeSessionRepository()
-    private val jwtSecurityProperties = JwtSecurityProperties(
-        issuer = "test-issuer",
-        secret = "test-secret",
-        accessTokenTtlSeconds = 3600L,
-    )
+    private val jwtSecurityProperties =
+        JwtSecurityProperties(
+            issuer = "test-issuer",
+            secret = "test-secret",
+            accessTokenTtlSeconds = 3600L,
+        )
     private val service = ActiveUserSessionService(sessionRepository, jwtSecurityProperties, "test-instance")
 
     @Test
@@ -152,7 +152,10 @@ class ActiveUserSessionServiceTest {
         var lastLoginMetadata: Map<String, String> = emptyMap()
             private set
 
-        override fun markLoggedIn(email: String, sessionMetadata: Map<String, String>) {
+        override fun markLoggedIn(
+            email: String,
+            sessionMetadata: Map<String, String>,
+        ) {
             val sessionId = sessionMetadata[SessionRepository.SessionMetadataKeys.JTI]
             if (sessionId.isNullOrBlank()) {
                 anonymousSessions[email] = (anonymousSessions[email] ?: 0) + 1
@@ -162,7 +165,10 @@ class ActiveUserSessionServiceTest {
             lastLoginMetadata = sessionMetadata
         }
 
-        override fun markLoggedOut(email: String?, sessionId: String?) {
+        override fun markLoggedOut(
+            email: String?,
+            sessionId: String?,
+        ) {
             if (email.isNullOrBlank()) return
             if (sessionId.isNullOrBlank()) {
                 activeSessions.remove(email)
@@ -176,10 +182,10 @@ class ActiveUserSessionServiceTest {
             }
         }
 
-        override fun isActive(email: String): Boolean =
-            !activeSessions[email].isNullOrEmpty() || (anonymousSessions[email] ?: 0) > 0
+        @Suppress("MaxLineLength")
+        override fun isActive(email: String): Boolean = !activeSessions[email].isNullOrEmpty() || (anonymousSessions[email] ?: 0) > 0
 
-        override fun listActiveEmails(): Set<String> =
-            (activeSessions.keys + anonymousSessions.filterValues { it > 0 }.keys).toSet()
+        @Suppress("MaxLineLength")
+        override fun listActiveEmails(): Set<String> = (activeSessions.keys + anonymousSessions.filterValues { it > 0 }.keys).toSet()
     }
 }

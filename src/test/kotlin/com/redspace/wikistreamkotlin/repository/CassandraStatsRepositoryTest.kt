@@ -4,16 +4,20 @@ import com.redspace.wikistreamkotlin.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.exception.RepositoryReadError
 import com.redspace.wikistreamkotlin.exception.RepositoryWriteError
 import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.*
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.times
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.`when`
 import org.springframework.dao.OptimisticLockingFailureException
-import java.util.*
+import java.util.Optional
 
 class CassandraStatsRepositoryTest {
-
     private val snapshotRepository = mock(StatsSnapshotCassandraRepository::class.java)
     private val repository = CassandraStatsRepository(snapshotRepository)
 
@@ -29,8 +33,8 @@ class CassandraStatsRepositoryTest {
                 "user@example.com",
                 WikiEventMockFactory.createWikiEvent(
                     user = "alice",
-                    bot = false
-                )
+                    bot = false,
+                ),
             )
 
             val snapshotCaptor = ArgumentCaptor.forClass(StatsSnapshot::class.java)
@@ -64,7 +68,7 @@ class CassandraStatsRepositoryTest {
         }
     }
 
-    // -------------------------------------------------- applyEvent edge cases --------------------------------------------------
+    // --- applyEvent edge cases ---
 
     @Test
     fun `recordForUser increments botCount and not nonBotCount for bot event`() {
