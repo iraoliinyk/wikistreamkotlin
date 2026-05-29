@@ -1,21 +1,59 @@
-services:
-  redis:
-    image: redis:7
-    container_name: wikistream-redis
-    profiles: ["redis"]
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 2s
-      retries: 5
+# ─── Infrastructure services ──────────────────────────────────────────────────
+# Start infrastructure only:  docker compose up -d
+# Start everything incl. app: docker compose --profile app up -d
+# ──────────────────────────────────────────────────────────────────────────────
 
-  cassandra:
-    container_name: wikistreamkotlin-cassandra
-    image: cassandra:5.0
+services:
+
+  # ── Redpanda (Kafka-compatible broker) ──────────────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v24.3.14
+    container_name: wikistream-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
     ports:
-      - "9042:9042"
+      - "19092:19092"   # external — reachable from the host for local dev/tools
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  redpanda-init:
+    image: redpandadata/redpanda:v24.3.14
+    container_name: wikistream-redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        rpk topic create wiki.recentchange.raw --brokers redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create wiki.recentchange.dlq --brokers redpanda:9092 --partitions 1 --replicas 1 || true
+    restart: "no"
+
+  # ── Cassandra ────────────────────────────────────────────────────────────────
+  cassandra:
+    image: cassandra:5.0
+    container_name: wikistream-cassandra
+    ports:
+      - "19042:9042"   # host 19042 to avoid conflict with local Cassandra on 9042
     environment:
       CASSANDRA_CLUSTER_NAME: wikistream-cluster
       CASSANDRA_DC: datacenter1
@@ -25,47 +63,91 @@ services:
       interval: 15s
       timeout: 10s
       retries: 20
-      start_period: 40s
+      start_period: 60s
     restart: unless-stopped
 
   cassandra-init:
-    container_name: wikistreamkotlin-cassandra-init
     image: cassandra:5.0
+    container_name: wikistream-cassandra-init
     depends_on:
       cassandra:
         condition: service_healthy
     volumes:
-      - ./src/main/resources/db/cassandra/schema.cql:/schema.cql:ro
+      - ./cmd/consumer/src/main/resources/db/cassandra/schema.cql:/schema.cql:ro
     entrypoint: ["/bin/sh", "-c", "cqlsh cassandra 9042 -f /schema.cql"]
     restart: "no"
 
-  wikistreamkotlin:
-    container_name: wikistreamkotlin
-    image: wikistreamkotlin:latest
+  # ── Redis (optional — only needed when APP_SESSION_BACKEND=redis) ────────────
+  redis:
+    image: redis:7-alpine
+    container_name: wikistream-redis
+    profiles: ["redis"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redpanda Console (UI for monitoring topics & messages) ─────────────────────
+  redpanda-console:
+    image: redpandadata/console:latest
+    container_name: wikistream-redpanda-console
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      SCHEMA_REGISTRY_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # ─── Application services (docker compose --profile app up -d) ───────────────
+  consumer:
+    container_name: wikistream-consumer
+    image: wikistream-consumer:latest
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.consumer
+    profiles: ["app"]
     depends_on:
+      cassandra-init:
+        condition: service_completed_successfully
+      redpanda-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
         required: false
-      cassandra-init:
-        condition: service_completed_successfully
     environment:
       APP_JWT_ISSUER: wikistreamkotlin-local
       APP_JWT_SECRET: local-jwt-secret-at-least-32-characters-long
       APP_JWT_ACCESS_TOKEN_TTL_SECONDS: 3600
+      APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
+      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND:-in-memory}
       CASSANDRA_CONTACT_POINTS: cassandra
       CASSANDRA_PORT: 9042
       CASSANDRA_KEYSPACE_NAME: wikistream
       CASSANDRA_LOCAL_DATACENTER: datacenter1
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_TIMEOUT: 2000ms
-      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND}
-      APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
-
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     ports:
       - "7000:7000"
     restart: unless-stopped
 
+  producer:
+    container_name: wikistream-producer
+    image: wikistream-producer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    profiles: ["app"]
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    restart: unless-stopped

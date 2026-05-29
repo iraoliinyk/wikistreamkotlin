@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.web.server.ResponseStatusException
 
 class GlobalErrorHandlerTest {
     private val handler = GlobalErrorHandler(AppErrorLogger())
@@ -35,6 +36,19 @@ class GlobalErrorHandlerTest {
         assertEquals("Unexpected error while processing request", response.detail)
         assertEquals("unexpected_app_error", response.properties?.get("type"))
         assertEquals("/v1/stats", response.properties?.get("path"))
+        assertNotNull(response.properties?.get("timestamp"))
+    }
+
+    @Test
+    fun `handleResponseStatusException keeps http status instead of converting to 500`() {
+        val request = MockServerHttpRequest.post("/v1/auth/register").build()
+        val response = handler.handleResponseStatusException(ResponseStatusException(HttpStatus.NOT_FOUND), request)
+
+        assertEquals(HttpStatus.NOT_FOUND.value(), response.status)
+        assertEquals("not_found_error", response.title)
+        assertEquals("Requested endpoint was not found", response.detail)
+        assertEquals("not_found_error", response.properties?.get("type"))
+        assertEquals("/v1/auth/register", response.properties?.get("path"))
         assertNotNull(response.properties?.get("timestamp"))
     }
 }

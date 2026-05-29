@@ -8,7 +8,7 @@ out
 .idea
 *.iml
 .DS_Store
-src/test
-src/integrationTest
-src/test/resources
+# Exclude test sources from Docker build context
+**/src/test
+**/src/integrationTest
 

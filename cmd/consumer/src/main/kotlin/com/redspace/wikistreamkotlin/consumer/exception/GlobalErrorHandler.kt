@@ -9,6 +9,7 @@ import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.bind.support.WebExchangeBindException
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.server.ServerWebInputException
 import java.time.Instant
 
@@ -23,6 +24,23 @@ class GlobalErrorHandler(
     ): ProblemDetail {
         appErrorLogger.log(error, context = mapOf("path" to request.path.value()))
         return error.toProblemDetail(request)
+    }
+
+    @ExceptionHandler(ResponseStatusException::class)
+    fun handleResponseStatusException(
+        exception: ResponseStatusException,
+        request: ServerHttpRequest,
+    ): ProblemDetail {
+        val statusCode = exception.statusCode
+        val detail = exception.reason?.takeIf { it.isNotBlank() } ?: defaultDetailForStatus(statusCode.value())
+        val type = defaultTypeForStatus(statusCode.value())
+
+        return ProblemDetail.forStatusAndDetail(statusCode, detail).apply {
+            title = type
+            setProperty("type", type)
+            setProperty("path", request.path.value())
+            setProperty("timestamp", Instant.now().toString())
+        }
     }
 
     @ExceptionHandler(Exception::class)
@@ -61,5 +79,23 @@ class GlobalErrorHandler(
             setProperty("type", "request_validation_error")
             setProperty("path", this@badRequestProblemDetail.path.value())
             setProperty("timestamp", Instant.now().toString())
+        }
+
+    private fun defaultDetailForStatus(status: Int): String =
+        when (status) {
+            HttpStatus.NOT_FOUND.value() -> "Requested endpoint was not found"
+            HttpStatus.UNAUTHORIZED.value() -> "Authentication is required"
+            HttpStatus.FORBIDDEN.value() -> "Access is forbidden"
+            HttpStatus.BAD_REQUEST.value() -> "Invalid request"
+            else -> "Request failed with HTTP $status"
+        }
+
+    private fun defaultTypeForStatus(status: Int): String =
+        when (status) {
+            HttpStatus.NOT_FOUND.value() -> "not_found_error"
+            HttpStatus.UNAUTHORIZED.value() -> "unauthorized_error"
+            HttpStatus.FORBIDDEN.value() -> "forbidden_error"
+            HttpStatus.BAD_REQUEST.value() -> "request_validation_error"
+            else -> "http_${status}_error"
         }
 }

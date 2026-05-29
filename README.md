@@ -1,39 +1,117 @@
-# About
-Spring Boot + Kotlin app that consumes the [wiki-recentchange stream](https://stream.wikimedia.org/v2/stream/recentchange).
+# wikistreamkotlin
 
-Events are aggregated per authenticated user into a `StatsSnapshot` and stored in Cassandra.
-Each user sees only their own stats while logged in; stats stop updating after logout.
+Spring Boot + Kotlin application that consumes the [Wikimedia recent-change stream](https://stream.wikimedia.org/v2/stream/recentchange), pipes events through **Redpanda** (Kafka-compatible broker), and aggregates per-user stats stored in Cassandra.
 
-# Read Me First
-This project requires Java 25, Kotlin and IntelliJ IDEA to run locally.
-
-Two Docker Compose files are provided:
-
-| File | Purpose |
-|---|---|
-| `docker-compose.yml` | Local Redis + local Cassandra + app |
-| `docker-compose.astra.yml` | Local Redis + app connected to DataStax Astra Cassandra |
-
-Sensitive Cassandra or Astra credentials must not be committed.
-Copy `config/cassandra-secrets.properties.template` to `config/cassandra-secrets.properties` and fill in real values.
-
-JWT auth secrets must not be committed.
-Copy `config/auth-secrets.properties.template` to `config/auth-secrets.properties` and set a strong signing secret.
-
-Session backend selection is centralized in the root `.env` file.
-Both `docker-compose.yml` and `docker-compose.astra.yml` read `APP_SESSION_BACKEND` from this file.
+Events are recorded only while a user is logged in. Each authenticated user sees only their own `StatsSnapshot`. Stats pause on logout and resume on the next login.
 
 ---
 
-## Documentation
+## Table of Contents
 
-### Authentication & Authorization
+- [Module Structure](#module-structure)
+- [Tech Stack](#tech-stack)
+- [Library Versions](#library-versions)
+- [Prerequisites](#prerequisites)
+- [Project Setup](#project-setup)
+- [Run Locally (Host Apps + Docker Infra)](#run-locally-host-apps--docker-infra)
+- [Running with Docker Compose](#running-with-docker-compose)
+- [Running with DataStax Astra (Cloud Cassandra)](#running-with-datastax-astra-cloud-cassandra)
+- [API Reference](#api-reference)
+- [Configuration Reference](#configuration-reference)
+- [Tests](#tests)
+- [Code Quality](#code-quality)
+- [Postman Collection](#postman-collection)
+- [Further Reading](#further-reading)
 
-- **[JWT & Bearer Token Scheme](JWT_BEARER_SCHEME.md)** — Token structure, signing, validation, revocation mechanisms, and detailed request lifecycle
+---
 
-### Session Management
+## Module Structure
 
-- **[Active User Sessions](ACTIVE_USER_SESSIONS.md)** — User login state tracking via Redis/in-memory, background stats recording, metadata schema, configuration, and error handling
+```
+wikistreamkotlin/
+├── cmd/
+│   ├── producer/                  # Standalone Spring Boot app
+│   │   └── src/main/kotlin/
+│   │       └── producer/
+│   │           ├── ProducerApplication.kt
+│   │           ├── ProducerIngestionRunner.kt  # @EventListener — starts SSE loop
+│   │           ├── WikiStreamClient.kt         # WebClient SSE intake → Flow<String>
+│   │           ├── WikiEventParser.kt          # JSON → WikiEvent (nullsafe)
+│   │           ├── RedpandaPublisher.kt        # KafkaTemplate → wiki.recentchange.raw
+│   │           └── config/
+│   │               ├── ProducerKafkaConfig.kt  # ProducerFactory + KafkaTemplate beans
+│   │               ├── WebClientConfig.kt
+│   │               └── WikiStreamProperties.kt
+│   │
+│   └── consumer/                  # Standalone Spring Boot app
+│       └── src/main/kotlin/
+│           └── consumer/
+│               ├── ConsumerApplication.kt
+│               ├── RedpandaBatchConsumer.kt    # @KafkaListener batch — processes events
+│               ├── config/
+│               │   ├── ConsumerKafkaConfig.kt           # ConsumerFactory + batchKafkaListenerContainerFactory
+│               │   ├── RedisConfig.kt                   # Lettuce connection + RedisTemplate
+│               │   ├── AstraDbConfig.kt                 # CqlSession customizer for Astra
+│               │   ├── AstraDbProperties.kt
+│               │   ├── AuthProperties.kt
+│               │   └── UserAccountAtomicRepositoryAutoConfiguration.kt
+│               ├── controller/
+│               │   ├── AuthController.kt       # /v1/auth/*
+│               │   ├── StatsController.kt      # /v1/stats, /v1/status
+│               │   └── dto/AuthDtos.kt
+│               ├── domain/
+│               │   ├── UserAccount.kt
+│               │   ├── StatsSnapshot.kt
+│               │   └── RevokedToken.kt
+│               ├── repository/
+│               │   ├── SessionRepository.kt              # Interface
+│               │   ├── RedisSessionRepository.kt         # Redis-backed (default)
+│               │   ├── InMemorySessionRepository.kt      # In-memory fallback
+│               │   ├── UserAccountAtomicRepository.kt    # Interface (CAS insert)
+│               │   ├── UserAccountCassandraRepository.kt # Spring Data
+│               │   ├── StatsRepository.kt                # Interface
+│               │   ├── CassandraStatsRepository.kt       # Optimistic-lock retry loop
+│               │   ├── StatsSnapshotCassandraRepository.kt
+│               │   └── RevokedTokenCassandraRepository.kt
+│               ├── security/
+│               │   ├── SecurityConfig.kt          # JWT filter chain (auth enabled)
+│               │   ├── NoAuthSecurityConfig.kt    # Permit-all (auth disabled)
+│               │   ├── JwtTokenService.kt
+│               │   ├── JwtSecurityProperties.kt
+│               │   ├── RevokedTokenWebFilter.kt   # jti revocation check
+│               │   └── GeneratedAccessToken.kt
+│               ├── service/
+│               │   ├── AuthService.kt
+│               │   ├── StatsService.kt
+│               │   └── ActiveUserSessionService.kt
+│               └── exception/
+│                   ├── GlobalErrorHandler.kt
+│                   └── AppErrorLogger.kt
+│
+└── lib/
+    └── core/                      # Shared contracts — no Spring Boot dependency
+        └── src/main/kotlin/
+            └── core/
+                ├── Topics.kt                  # Topic name constants
+                ├── EventEnvelope.kt           # Generic schema-versioned wrapper
+                ├── domain/
+                │   ├── WikiEvent.kt
+                │   └── WikiEventMeta.kt
+                └── exception/
+                    └── AppError.kt            # Sealed error hierarchy
+```
+
+### Ownership matrix
+
+| Concern | `cmd/producer` | `cmd/consumer` | `lib/core` |
+|---------|:--------------:|:--------------:|:----------:|
+| Wikimedia SSE intake | ✅ | ❌ | ❌ |
+| Publish to Redpanda | ✅ | ❌ | ❌ |
+| Consume from Redpanda | ❌ | ✅ | ❌ |
+| Cassandra persistence | ❌ | ✅ | ❌ |
+| REST API + Auth | ❌ | ✅ | ❌ |
+| Event DTOs / topic names | ❌ | ❌ | ✅ |
+| Error hierarchy | ❌ | ❌ | ✅ |
 
 ---
 
@@ -41,117 +119,113 @@ Both `docker-compose.yml` and `docker-compose.astra.yml` read `APP_SESSION_BACKE
 
 ### Language & Runtime
 | Component | Version |
-|---|---|
+|-----------|---------|
 | Kotlin | 2.3.0 |
 | Java | 25 (Eclipse Temurin) |
 | Gradle | 9.x (Kotlin DSL) |
 
 ### Framework
 | Component | Version | Role |
-|---|---|---|
+|-----------|---------|------|
 | Spring Boot | 4.0.5 | Application framework |
 | Spring WebFlux | (Boot-managed) | Reactive HTTP server (Netty) |
-| Spring Data Cassandra | (Boot-managed) | Cassandra ORM |
-| Spring Data Redis | (Boot-managed) | Redis session storage |
+| Spring Kafka | 4.0.4 | Kafka protocol layer for Redpanda |
+| Spring Data Cassandra | (Boot-managed) | Cassandra ORM + repositories |
+| Spring Data Redis | (Boot-managed) | Redis session storage (Lettuce) |
 | Spring Security | (Boot-managed) | Auth filter chain |
 | Spring Security OAuth2 Resource Server + Jose | (Boot-managed) | JWT decode & validation |
 | Kotlinx Coroutines + Reactor bridge | (Boot-managed) | Coroutine ↔ Reactor interop |
 
-### Storage
-| Store | Usage |
-|---|---|
-| Apache Cassandra 5.0 | User accounts, stats snapshots, revoked tokens |
-| Redis 7 | Active session tracking (login/logout state) |
-| DataStax Astra | Cloud-hosted Cassandra (Astra profile) |
+### Messaging
+| Component | Role |
+|-----------|------|
+| Redpanda (Kafka-compatible) | Message broker — decouples producer from consumer |
+| Topic `wiki.recentchange.raw` | Raw `WikiEvent` JSON (3 partitions) |
+| Topic `wiki.recentchange.dlq` | Dead-letter queue for unprocessable records (1 partition) |
 
-### External Data Source
-| Source | Protocol |
-|---|---|
-| [Wikimedia recent-change stream](https://stream.wikimedia.org/v2/stream/recentchange) | Server-Sent Events (SSE) via `WebClient` |
+### Storage
+| Store | Version | Usage |
+|-------|---------|-------|
+| Apache Cassandra | 5.0 | User accounts, stats snapshots, revoked tokens |
+| Redis | 7 | Active session tracking (login/logout state + TTL) |
+| DataStax Astra | cloud | Managed Cassandra (optional Astra profile) |
 
 ### Auth
 | Mechanism | Details |
-|---|---|
+|-----------|---------|
 | JWT (HS256) | Signed with app secret, TTL-based expiry |
 | Bearer scheme | `Authorization: Bearer <token>` on protected routes |
-| Token revocation | Blocked server-side via `revoked_tokens` Cassandra table + `jti` lookup |
+| Token revocation | `revoked_tokens` Cassandra table + `jti` lookup on every request |
 | Session state | Redis hash per email, TTL mirrors JWT expiry |
 
+### Code Quality
+| Tool | Version | Role |
+|------|---------|------|
+| detekt | 2.0.0-alpha.2 | Static analysis |
+| ktlint (plugin) | 12.1.1 | Code formatting |
+| ktlint (engine) | 1.5.0 | Formatting rules engine |
+
 ### Testing
-| Library | Role |
-|---|---|
-| JUnit 5 | Test runner |
-| Mockito-Kotlin 5.4.0 | Mocking |
-| Spring Boot Test | Integration test support |
-| WebTestClient | HTTP-layer integration tests |
-| Reactor Test | Reactive stream assertions |
-| Testcontainers 2.0.4 | Real Redis and Cassandra in tests |
-
-### Infrastructure
-| Component | Details |
-|---|---|
-| Docker | Multi-stage build (builder: JDK 25 + Gradle cache, runtime: JRE 25 Alpine) |
-| Docker Compose | `docker-compose.yml` (local), `docker-compose.astra.yml` (Astra) |
-| Lettuce | Reactive Redis client (pooled, configurable host/port) |
-| kotlin-logging-jvm 2.0.11 | Structured logging facade |
+| Library | Version | Role |
+|---------|---------|------|
+| JUnit 5 | (Boot-managed) | Test runner |
+| Mockito-Kotlin | 5.4.0 | Mocking |
+| Spring Boot Test | (Boot-managed) | Context loading + test slices |
+| Testcontainers | 2.0.4 | Real Cassandra + Redis in integration tests |
+| Reactor Test | (Boot-managed) | Reactive stream assertions |
 
 ---
 
-## API Reference
+## Library Versions
 
-### Stats
-| Method | Path | Auth required | Description |
-|---|---|---|---|
-| `GET` | `/v1/stats` | ✅ Bearer token | Returns the authenticated user's personal stats snapshot |
-| `GET` | `/v1/status` | ❌ | Health check |
+> All Spring ecosystem libraries without an explicit version are managed by the Spring Boot 4.0.5 BOM.
 
-Stats include:
-- number of messages consumed while the user was logged in
-- number of distinct Wikipedia users seen
-- number of bots and non-bots
-- count by distinct server URLs
-
-> Stats are scoped to the authenticated user. Events are only recorded for currently logged-in users. After logout, recording stops and the next login continues from the last saved snapshot.
-
-### Auth
-| Method | Path | Auth required | Description |
-|---|---|---|---|
-| `POST` | `/v1/auth/register` | ❌ | Register with `{ email, password }` |
-| `POST` | `/v1/auth/login` | ❌ | Login and receive JWT Bearer token |
-| `POST` | `/v1/auth/logout` | ✅ Bearer token | Revoke current token |
+| Library | Version |
+|---------|---------|
+| `kotlin` | 2.3.0 |
+| `spring-boot` | 4.0.5 |
+| `spring-kafka` | 4.0.4 |
+| `kotlinx-coroutines-reactor` | (BOM) |
+| `jackson-module-kotlin` | (BOM) |
+| `jackson-databind` | (BOM) |
+| `netty` | 4.2.12.Final |
+| `testcontainers-bom` | 2.0.4 |
+| `mockito-kotlin` | 5.4.0 |
+| `kotlin-logging-jvm` | 2.0.11 |
+| `detekt` (plugin) | 2.0.0-alpha.2 |
+| `ktlint` (plugin) | 12.1.1 |
+| `ktlint` (engine) | 1.5.0 |
 
 ---
 
-## Cassandra configuration
+## Prerequisites
 
-The application uses Spring Boot Cassandra properties from `src/main/resources/application.properties`.
-
-Default local values:
-
-- contact point: `localhost`
-- port: `9042`
-- keyspace: `wikistream`
-- datacenter: `datacenter1`
-
-Schema is defined in `src/main/resources/db/cassandra/schema.cql` and applied automatically by `cassandra-init` on first startup.
+| Tool | Minimum version | Notes |
+|------|----------------|-------|
+| JDK | 25 | Eclipse Temurin recommended |
+| Docker | 24+ | Required for compose and integration tests |
+| Docker Compose | v2 | `docker compose` (not `docker-compose`) |
+| IntelliJ IDEA | 2024+ | Kotlin plugin bundled |
 
 ---
 
-## Run with Docker Compose — Local Cassandra
+## Project Setup
 
-`docker-compose.yml` starts local Redis and Cassandra 5.0 containers, applies the schema, then starts the app.
-No external credentials required.
-
-`APP_SESSION_BACKEND` comes from `.env` (single source of truth).
-Repo default is `APP_SESSION_BACKEND=redis`.
-
-**Step 1** — (Optional) create JWT auth secrets file:
+### 1. Clone
 
 ```bash
-cp config/auth-secrets.properties.template config/auth-secrets.properties
+git clone https://github.com/your-org/wikistreamkotlin.git
+cd wikistreamkotlin
 ```
 
-Edit `config/auth-secrets.properties` and set a strong JWT secret (at least 32 characters):
+### 2. Copy secrets templates
+
+```bash
+cp config/auth-secrets.properties.template     config/auth-secrets.properties
+cp config/cassandra-secrets.properties.template config/cassandra-secrets.properties
+```
+
+**`config/auth-secrets.properties`** — set a strong JWT signing secret (≥ 32 chars):
 
 ```properties
 app.security.jwt.issuer=wikistreamkotlin
@@ -159,137 +233,257 @@ app.security.jwt.secret=your-long-random-secret-here-at-least-32-chars
 app.security.jwt.access-token-ttl-seconds=3600
 ```
 
-> If you skip this step, JWT values default to the env vars set in `docker-compose.yml` and the app will still start.
+**`config/cassandra-secrets.properties`** — only needed for the Astra profile (leave blank for local Cassandra).
 
-**Step 2** — Start all services and build image:
+### 3. Choose session backend
 
-```bash
-docker compose up --build
+Edit `.env` (repository root):
+
+```dotenv
+# Allowed values: redis | in-memory
+APP_SESSION_BACKEND=redis
 ```
 
-Run in detached mode:
+### 4. Build all modules
 
 ```bash
-docker compose up --build -d
+./gradlew build -x test
 ```
 
-**Step 3** — Verify the app is running:
+The root project is an aggregator for shared build/lint tasks. Runnable Spring Boot artifacts are built from module tasks:
 
 ```bash
-curl http://localhost:7000/v1/status
+./gradlew :cmd:producer:bootJar
+./gradlew :cmd:consumer:bootJar
 ```
 
-Expected response: `{ "status": "ok" }`
-
-Quick Redis session check (inside app container):
+### 5. Run unit tests
 
 ```bash
-docker exec wikistreamkotlin ping -c 1 redis
+./gradlew :cmd:producer:test :cmd:consumer:test :lib:core:test
 ```
 
-**Step 4** — Stop and remove containers:
+---
+
+## Run Locally (Host Apps + Docker Infra)
+
+This mode runs infrastructure with Docker and starts `consumer` / `producer` directly from Gradle.
+
+### 1) Start infrastructure
+
+```bash
+cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
+docker compose up -d
+```
+
+This starts:
+- `redpanda` on `localhost:19092`
+- `cassandra` on `localhost:19042`
+- init jobs: `redpanda-init` (topics), `cassandra-init` (schema)
+
+Redis is profile-based and does **not** start by default:
+
+```bash
+cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
+docker compose --profile redis up -d
+```
+
+Verify:
+
+```bash
+docker compose ps -a
+```
+
+### 2) Run consumer locally
+
+Use `APP_AUTH_ENABLED=true` if you need `/v1/auth/register` and `/v1/auth/login`.
+
+```bash
+cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
+APP_JWT_ISSUER=wikistream-local \
+APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
+APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
+APP_AUTH_ENABLED=true \
+APP_SESSION_BACKEND=in-memory \
+SERVER_PORT=7001 \
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
+CASSANDRA_CONTACT_POINTS=127.0.0.1 \
+CASSANDRA_PORT=19042 \
+CASSANDRA_KEYSPACE_NAME=wikistream \
+CASSANDRA_LOCAL_DATACENTER=datacenter1 \
+./gradlew :cmd:consumer:bootRun
+```
+
+Health check:
+
+```bash
+curl http://localhost:7001/v1/status
+```
+
+### 3) Run producer locally
+
+```bash
+cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
+./gradlew :cmd:producer:bootRun
+```
+
+### 4) Stop both local apps
+
+If both apps were started via Gradle (`:cmd:consumer:bootRun` and `:cmd:producer:bootRun`), stop them with:
+
+```bash
+pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun' 2>/dev/null || true
+pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun' 2>/dev/null || true
+kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true
+```
+
+### 5) Most common local issues
+
+- `bootRun` stuck at `92% EXECUTING` is usually a running app waiting for requests (normal for long-running Spring tasks).
+- `Port 7001 was already in use`:
+
+```bash
+kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true
+```
+
+- `POST /v1/auth/register` returns `404`: set `APP_AUTH_ENABLED=true`.
+
+- `GET /v1/stats` returns `401`: login first and send `Authorization: Bearer <accessToken>`.
+
+- If `GET /v1/stats` still returns `401` with a token, refresh token via login (old token may be signed with a different JWT secret/issuer from a previous run).
+
+- `GET /v1/stats` returns zeros only: producer is not feeding events yet, or multiple consumer instances are running with `APP_SESSION_BACKEND=in-memory` (session state is per-instance).
+
+- Inspect running Gradle tasks and their listening ports (macOS/zsh):
+
+```bash
+(printf "%-8s | %-45s | %s\n" "PID" "TASK" "PORTS"; printf "%-8s-+-%-45s-+-%s\n" "--------" "---------------------------------------------" "-----"; ps -ax -o pid=,command= | grep 'org.gradle.appname=gradlew' | grep -v grep | while read -r pid cmd; do task=$(printf "%s" "$cmd" | sed -E 's#^.*gradle-wrapper\.jar[[:space:]]+##'); ports=$(pgrep -P "$pid" java | while read -r jpid; do lsof -nP -a -p "$jpid" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1{split($9,a,":"); print a[length(a)]}'; done | sort -u | paste -sd, -); [ -z "$ports" ] && ports="-"; printf "%-8s | %-45s | %s\n" "$pid" "$task" "$ports"; done)
+```
+
+- `POST /v1/auth/register` returns `500` with `unexpected_app_error`: fixed in current code; if seen, restart with latest build.
+
+For the full local walkthrough, see `readme_local_launch.md`.
+
+---
+
+## Running with Docker Compose
+
+`docker-compose.yml` is profile-based:
+- default (`docker compose up -d`): infra only (`redpanda`, `cassandra`, init jobs)
+- `redis` profile: optional Redis
+- `app` profile: `consumer` + `producer` containers
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ docker compose up -d                                    │
+│ redpanda-init  -> wiki.recentchange.raw / .dlq topics   │
+│ cassandra-init -> keyspace/tables from schema.cql       │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Start
+
+```bash
+docker compose up -d
+```
+
+With Redis too:
+
+```bash
+docker compose --profile redis up -d
+```
+
+Start app containers too:
+
+```bash
+docker compose --profile app up -d
+```
+
+### Verify
+
+```bash
+docker compose ps -a
+```
+
+### Redpanda (from host)
+
+The broker is reachable at `localhost:19092` for local tooling (e.g. `rpk`, Kafka UI):
+
+```bash
+docker exec wikistream-redpanda rpk topic list
+```
+
+### Inspect Cassandra
+
+```bash
+docker exec -it wikistream-cassandra cqlsh
+```
+
+```cql
+USE wikistream;
+SELECT email, active FROM user_accounts LIMIT 20;
+SELECT id, total_messages, distinct_users FROM stats_snapshots LIMIT 20;
+SELECT jti, email FROM revoked_tokens LIMIT 20;
+```
+
+### Stop
 
 ```bash
 docker compose down
 ```
 
-### Inspect local Cassandra data
-
-Open an interactive CQL shell:
-
-```bash
-docker exec -it wikistreamkotlin-cassandra cqlsh
-```
-
-### CQL test queries
-
-```cql
-USE wikistream;
-
-SELECT email, active FROM user_accounts LIMIT 20;
-SELECT id, total_messages, distinct_users, bot_count FROM stats_snapshots LIMIT 20;
-SELECT * FROM revoked_tokens LIMIT 20;
-```
-
 ---
 
-## Run with Docker Compose — DataStax Astra
+## Running with DataStax Astra (Cloud Cassandra)
 
-`docker-compose.astra.yml` starts local Redis + app (no local Cassandra). All DB calls go to Astra cloud.
-The `config/` directory is mounted read-only into the container so secrets are never baked into the image.
+`docker-compose.astra.yml` replaces local Cassandra with DataStax Astra. Redpanda and Redis still run locally.
 
-`APP_SESSION_BACKEND` comes from `.env` (single source of truth).
-Repo default is `APP_SESSION_BACKEND=redis`.
-
-**Step 1** — Prepare secrets files:
+### Step 1 — Prepare credentials
 
 ```bash
 cp config/cassandra-secrets.properties.template config/cassandra-secrets.properties
-cp config/auth-secrets.properties.template config/auth-secrets.properties
+cp config/auth-secrets.properties.template      config/auth-secrets.properties
 ```
 
-**Step 2** — Edit `config/cassandra-secrets.properties`:
+Edit `config/cassandra-secrets.properties`:
 
 ```properties
 spring.profiles.active=astra
-astra.db.secure-connect-bundle=./config/secure-connect-<your-db-name>.zip
+astra.db.secure-connect-bundle=./config/secure-connect-<your-db>.zip
 astra.db.token=AstraCS:...your-token...
 ASTRA_DB_KEYSPACE=your-keyspace-name
 ASTRA_DB_LOCAL_DATACENTER=your-datacenter
 ```
 
 Place the Astra Secure Connect Bundle (`.zip`) in the `config/` directory.
-`astra.db.secure-connect-bundle` must point to it using `./config/` as the path prefix.
 
-**Step 3** — Edit `config/auth-secrets.properties`:
+### Step 2 — Create tables in Astra
 
-```properties
-app.security.jwt.issuer=wikistreamkotlin
-app.security.jwt.secret=your-long-random-secret-here-at-least-32-chars
-app.security.jwt.access-token-ttl-seconds=3600
-```
+In the Astra web UI → **Data Explorer** → run the DDL from `src/main/resources/db/cassandra/schema.cql`  
+(skip the `CREATE KEYSPACE` and `USE` lines — Astra manages keyspace creation).
 
-**Step 4** — Create keyspace tables on Astra before the first run.
-Open the Astra web UI → **Data Explorer** → run the SQL from `src/main/resources/db/cassandra/schema.cql`
-(skip the `CREATE KEYSPACE` and `USE` lines, which are for local Cassandra only).
-
-**Step 5** — Start app connected to Astra:
+### Step 3 — Start
 
 ```bash
-docker compose -f docker-compose.astra.yml --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build
+docker compose -f docker-compose.astra.yml \
+  --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" \
+  up --build
 ```
 
-Detached:
-
-```bash
-docker compose -f docker-compose.astra.yml --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" up --build -d
-```
-
-**Step 6** — Warm up Astra (recommended when DB may be hibernating):
+### Step 4 — Astra warm-up (if DB is hibernating)
 
 ```bash
 bash scripts/astra-warmup-check.sh
 ```
 
-Optional custom retry tuning:
-
-```bash
-BASE_URL=http://localhost:7000 MAX_ATTEMPTS=45 SLEEP_SECONDS=8 bash scripts/astra-warmup-check.sh
-```
-
-**Step 7** — Verify:
+### Step 5 — Verify
 
 ```bash
 curl http://localhost:7000/v1/status
 ```
 
-Optional Redis reachability check:
-
-```bash
-docker exec wikistreamkotlin ping -c 1 redis
-```
-
-**Step 8** — Stop:
+### Stop
 
 ```bash
 docker compose -f docker-compose.astra.yml down
@@ -297,186 +491,177 @@ docker compose -f docker-compose.astra.yml down
 
 ---
 
-## Login and Stats Flow (Redis-backed sessions)
+## API Reference
 
-Use this quick flow after either compose setup to verify auth + session + stats:
+### Health
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/v1/status` | ❌ | Returns `{"status":"ok"}` |
+
+### Auth
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/v1/auth/register` | ❌ | Register `{ "email", "password" }` → `201` |
+| `POST` | `/v1/auth/login` | ❌ | Login → `{ "accessToken": "..." }` |
+| `POST` | `/v1/auth/logout` | ✅ Bearer | Revoke current token → `204` |
+
+### Stats
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/v1/stats` | ✅ Bearer | Returns authenticated user's `StatsSnapshot` |
+
+`StatsSnapshot` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `totalMessages` | `Long` | Messages received while logged in |
+| `distinctUsers` | `Int` | Distinct Wikipedia usernames seen |
+| `botCount` | `Long` | Bot-authored edits |
+| `nonBotCount` | `Long` | Human-authored edits |
+| `countByServerUrl` | `Map<String,Int>` | Edits per Wikipedia server |
+
+### Quick flow
 
 ```bash
+# Register
 curl -X POST http://localhost:7000/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"local-flow@example.com","password":"StrongPass#123"}'
+  -d '{"email":"me@example.com","password":"StrongPass#123"}'
 
+# Login — copy accessToken from response
 curl -X POST http://localhost:7000/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"local-flow@example.com","password":"StrongPass#123"}'
-```
+  -d '{"email":"me@example.com","password":"StrongPass#123"}'
 
-Copy the returned access token into `ACCESS_TOKEN`, then request stats:
-
-```bash
-ACCESS_TOKEN="<paste-token-here>"
-curl http://localhost:7000/v1/stats -H "Authorization: Bearer $ACCESS_TOKEN"
-```
-
----
-## Postman Collection
-
-A Postman collection is provided at `postman_collection.json`.
-
-It covers all API calls in the correct order with automatic token extraction.
-
-### Import
-
-1. Open Postman
-2. Click **Import** (top-left)
-3. Select `postman_collection.json` from the project root
-
-### Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `BASE_URL` | `http://localhost:7000` | App base URL |
-| `TEST_EMAIL` | `local-test-@example.com` | Auto-replaced with timestamped email on first run |
-| `TEST_PASSWORD` | `StrongPass#123` | Password for register and login |
-| `ACCESS_TOKEN` | _(set by Login)_ | Bearer token extracted automatically after login |
-
-> The collection pre-request script generates a unique timestamped email **once** per run.
-> It does not regenerate on each call, so register and login always use the same email.
-
-### Request order
-
-Run requests in this order for a complete auth + stats flow:
-
-1. **Health Check** — verify app is reachable
-2. **Register User** — creates account (expects `201`)
-3. **Login** — returns and saves `ACCESS_TOKEN` automatically
-4. **Fetch Stats** — uses `Authorization: Bearer {{ACCESS_TOKEN}}`
-5. **Logout** — revokes token
-6. **Verify Revoked Token** — confirms re-use returns `401`
-
-### Run as collection
-
-1. Click the collection name in Postman
-2. Click the **▶ Run** button
-3. All 6 requests execute sequentially with pass/fail results
-
-### Reset between runs
-
-If you want to register a fresh email:
-- In Postman → **Collections** → collection variables
-- Reset `TEST_EMAIL` to `local-test-@example.com`
-- The next run will auto-generate a new unique email
-
----
-
-
-## Run with Docker (image only)
-
-### Docker build flow
-
-The repository uses a multi-stage `Dockerfile`:
-
-1. **Builder stage (`eclipse-temurin:25-jdk`)**
-   - Uses the Gradle wrapper to build the Spring Boot fat jar
-   - Uses BuildKit cache mounts for `~/.gradle` to speed up repeated builds
-2. **Runtime stage (`eclipse-temurin:25-jre-alpine`)**
-   - Copies only the generated `app.jar`
-   - Runs as a non-root user (`uid 10001`)
-   - Keeps a minimal runtime footprint (no build toolchain)
-
-The `.dockerignore` excludes Git metadata, IDE files, build outputs, and test sources to keep build context small and deterministic.
-
-Build the application image without Docker Compose:
-
-```bash
-docker build -t wikistreamkotlin:latest .
-```
-
-Run the container (requires separate running Cassandra and env vars):
-
-```bash
-docker run --rm -p 7000:7000 --name wikistreamkotlin wikistreamkotlin:latest
-```
-
-### Test published image from GHCR
-
-Pull and run the image published by CI/CD (example tag: `ch-4`).
-
-**Astra mode (recommended for GHCR image validation):**
-
-1. Start local Redis:
-
-```bash
-docker run -d --name wikistream-redis -p 6379:6379 redis:7
-```
-
-2. Run the GHCR image with Astra profile and mounted config files:
-
-```bash
-docker run --rm -p 7000:7000 \
-  -v "$PWD/config:/app/config:ro" \
-  -e SPRING_PROFILES_ACTIVE=astra \
-  -e SPRING_DATA_REDIS_HOST=host.docker.internal \
-  -e SPRING_DATA_REDIS_PORT=6379 \
-  -e APP_SESSION_BACKEND=redis \
-  ghcr.io/iraoliinyk/wikistreamkotlin:ch-4
-```
-
-3. Verify app health:
-
-```bash
-curl http://localhost:7000/v1/status
-```
-
-4. If Astra is hibernating, run warm-up check:
-
-```bash
-bash scripts/astra-warmup-check.sh
-```
-
-5. Cleanup:
-
-```bash
-docker stop wikistream-redis
-docker rm wikistream-redis
-```
-
-> Note: Running `docker run ghcr.io/...` without Astra/local Cassandra configuration will fail because the app requires a reachable Cassandra backend at startup.
-
----
-
-## Code Quality Checks
-
-Run detekt + ktlint together via the aggregated Gradle task:
-
-```bash
-./gradlew lintKotlin
-```
-
-For full failure diagnostics in terminal/CI logs:
-
-```bash
-./gradlew lintKotlin --stacktrace
+# Stats
+curl http://localhost:7000/v1/stats \
+  -H "Authorization: Bearer <accessToken>"
 ```
 
 ---
 
-## Test Tasks
+## Configuration Reference
 
-Run only unit tests:
+### Producer — `cmd/producer/src/main/resources/application.properties`
+
+| Property | Default | Env override |
+|----------|---------|--------------|
+| `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` |
+| `wiki.stream.url` | Wikimedia SSE URL | — |
+| `wiki.stream.user-agent` | `wikistream-producer/local` | — |
+
+### Consumer — `cmd/consumer/src/main/resources/application.properties`
+
+| Property | Default | Env override |
+|----------|---------|--------------|
+| `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` |
+| `spring.kafka.consumer.group-id` | `wiki-consumer` | — |
+| `spring.kafka.consumer.max-poll-records` | `50` | — |
+| `spring.cassandra.contact-points` | `localhost` | `CASSANDRA_CONTACT_POINTS` |
+| `spring.cassandra.port` | `9042` | `CASSANDRA_PORT` |
+| `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` |
+| `spring.data.redis.host` | `localhost` | `SPRING_DATA_REDIS_HOST` |
+| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` |
+| `app.session.backend` | `redis` | `APP_SESSION_BACKEND` |
+| `app.auth.enabled` | `true` | `APP_AUTH_ENABLED` |
+| `app.security.jwt.secret` | _(required)_ | via `config/auth-secrets.properties` |
+
+### Secrets files (git-ignored)
+
+| File | Template | Purpose |
+|------|----------|---------|
+| `config/auth-secrets.properties` | `*.template` | JWT issuer, secret, TTL |
+| `config/cassandra-secrets.properties` | `*.template` | Astra bundle path + token |
+
+---
+
+## Tests
+
+### Unit tests (no Docker required)
 
 ```bash
-./gradlew unitTest
+./gradlew :lib:core:test
+./gradlew :cmd:producer:test
+./gradlew :cmd:consumer:test
 ```
 
-Run only integration tests:
+Or all at once via the root aggregator:
+
+```bash
+./gradlew ciTest
+```
+
+### Integration tests (Docker required)
+
+Integration tests spin up real Cassandra and Redis containers via Testcontainers — no `docker compose up` needed beforehand.
+
+```bash
+./gradlew :cmd:consumer:integrationTest
+```
+
+Or via root:
 
 ```bash
 ./gradlew integrationTest
 ```
 
-Run both in sequence:
+### Coverage
+
+| Suite | Tests | Scope |
+|-------|-------|-------|
+| `lib:core:test` | 1 | Domain model |
+| `cmd:producer:test` | 2 | Parser, publisher |
+| `cmd:consumer:test` | 20 | Services, security, error handling |
+| `cmd:consumer:integrationTest` | 21 | Cassandra repos, Redis sessions, AuthService |
+| **Total** | **44** | |
+
+---
+
+## Code Quality
 
 ```bash
-./gradlew unitTest integrationTest
+# detekt (static analysis) + ktlint (formatting)
+./gradlew lintKotlin
+
+# With full stacktrace for CI logs
+./gradlew lintKotlin --stacktrace
 ```
+
+detekt config: `config/detekt/detekt.yml`
+
+---
+
+
+## Postman Collection
+
+`postman_collection.json` covers the complete auth + stats flow with automatic token extraction.
+
+**Import:** Postman → **Import** → select `postman_collection.json`
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BASE_URL` | `http://localhost:7000` | App base URL |
+| `TEST_EMAIL` | `local-test-@example.com` | Auto-replaced with timestamped email on first run |
+| `TEST_PASSWORD` | `StrongPass#123` | Used for register and login |
+| `ACCESS_TOKEN` | _(set by Login request)_ | Bearer token, extracted automatically |
+
+**Request order:**
+1. Health Check
+2. Register User
+3. Login (saves `ACCESS_TOKEN`)
+4. Fetch Stats
+5. Logout
+6. Verify Revoked Token → expects `401`
+
+---
+
+## Further Reading
+
+| Document | Description |
+|----------|-------------|
+| [`JWT_BEARER_SCHEME.md`](JWT_BEARER_SCHEME.md) | Token structure, signing, validation, revocation lifecycle |
+| [`ACTIVE_USER_SESSIONS.md`](ACTIVE_USER_SESSIONS.md) | Session tracking via Redis, metadata schema, configuration |
+| [`REDPANDA_IMPLEMENTATION_GUIDE.md`](REDPANDA_IMPLEMENTATION_GUIDE.md) | Full migration guide: producer/consumer split, Redpanda setup |

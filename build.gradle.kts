@@ -78,6 +78,11 @@ tasks.withType<Test> {
     jvmArgs("--enable-native-access=ALL-UNNAMED", "--sun-misc-unsafe-memory-access=allow", "-Xshare:off")
 }
 
+// Root project is an aggregator; runnable Spring Boot apps live in cmd modules.
+tasks.named("bootJar") {
+    enabled = false
+}
+
 tasks.named<Test>("test") {
     description = "Runs unit tests (default Gradle test task)."
 }
