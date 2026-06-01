@@ -1,7 +1,7 @@
 package com.redspace.wikistreamkotlin.producer
 
 import com.redspace.wikistreamkotlin.producer.config.WikiStreamProperties
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -20,7 +20,7 @@ class WikiStreamClientTest {
         val exchange = RecordingExchangeFunction()
         val client = wikiStreamClient(exchange)
 
-        runBlocking { client.streamRawEvents().collect() }
+        runBlocking { client.streamRawEvents().take(1).collect{} }
 
         assertEquals(listOf(MediaType.TEXT_EVENT_STREAM_VALUE), exchange.lastRequest!!.headers()[HttpHeaders.ACCEPT])
     }
@@ -30,7 +30,7 @@ class WikiStreamClientTest {
         val exchange = RecordingExchangeFunction()
         val client = wikiStreamClient(exchange)
 
-        runBlocking { client.streamRawEvents().collect() }
+        runBlocking { client.streamRawEvents().take(1).collect{} }
 
         assertEquals("wikistream-producer/test", exchange.lastRequest!!.headers()[HttpHeaders.USER_AGENT]?.single())
     }
@@ -40,7 +40,7 @@ class WikiStreamClientTest {
         val exchange = RecordingExchangeFunction()
         val client = wikiStreamClient(exchange)
 
-        runBlocking { client.streamRawEvents().collect() }
+        runBlocking { client.streamRawEvents().take(1).collect{} }
 
         assertEquals("https://stream.example.test/recentchange", exchange.lastRequest!!.url().toString())
     }
