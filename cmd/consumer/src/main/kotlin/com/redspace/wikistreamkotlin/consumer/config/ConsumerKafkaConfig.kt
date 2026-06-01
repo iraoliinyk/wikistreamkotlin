@@ -11,7 +11,7 @@ import org.springframework.kafka.listener.ContainerProperties
 
 @Configuration
 class ConsumerKafkaConfig(
-    @Value("\${spring.kafka.bootstrap-servers}") private val bootstrapServers: String,
+    @Value("\${spring.kafka.bootstrap-servers:localhost:19092}") private val bootstrapServers: String,
     @Value("\${spring.kafka.consumer.group-id:wiki-consumer}") private val groupId: String,
     @Value("\${spring.kafka.consumer.max-poll-records:50}") private val maxPollRecords: Int,
 ) {
