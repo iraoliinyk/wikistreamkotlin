@@ -22,16 +22,21 @@ class RedpandaBatchConsumer(
     fun consume(records: List<ConsumerRecord<String, String>>, ack: Acknowledgment) {
         runBlocking {
             records
-                .map { record ->
-                    async(Dispatchers.Default) {
-                        try {
-                            val event = objectMapper.readValue(record.value(), WikiEvent::class.java)
-                            statsService.recordForActiveUsers(event)
-                        } catch (ex: Exception) {
-                            // log and skip malformed records
-                        }
+                .mapNotNull { record ->
+                    try {
+                        objectMapper.readValue(record.value(), WikiEvent::class.java)
+                    } catch (_: com.fasterxml.jackson.core.JsonProcessingException) {
+                        // Parsing errors are handled by KafkaErrorHandler
+                        // We skip them here to continue processing valid records
+                        null
                     }
-                }.awaitAll()
+                }
+                .map { event ->
+                    async(Dispatchers.Default) {
+                        statsService.recordForActiveUsers(event)
+                    }
+                }
+                .awaitAll()
         }
         ack.acknowledge()
     }

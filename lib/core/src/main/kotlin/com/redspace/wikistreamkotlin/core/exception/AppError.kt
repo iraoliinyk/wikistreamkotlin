@@ -133,3 +133,28 @@ class UnexpectedAppError(
         message = message,
         cause = cause,
     )
+/**
+ * Error for malformed Kafka records (invalid JSON, parsing failures).
+ * These are data quality issues from upstream and should not be retried.
+ */
+class MalformedKafkaRecordError(
+    message: String,
+    cause: Throwable? = null,
+) : AppError(
+    type = "malformed_kafka_record",
+    message = message,
+    cause = cause,
+)
+
+/**
+ * Error for failures during Kafka record processing (DB errors, network issues, etc.).
+ * These are transient issues and should trigger retry.
+ */
+class KafkaProcessingError(
+    message: String,
+    cause: Throwable? = null,
+) : AppError(
+    type = "kafka_processing_error",
+    message = message,
+    cause = cause,
+)
