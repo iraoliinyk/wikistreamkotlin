@@ -13,11 +13,9 @@ Events are recorded only while a user is logged in. Each authenticated user sees
 - [Library Versions](#library-versions)
 - [Prerequisites](#prerequisites)
 - [Project Setup](#project-setup)
-- [Run Locally (Host Apps + Docker Infra)](#run-locally-host-apps--docker-infra)
-- [Running with Docker Compose](#running-with-docker-compose)
-- [Running with DataStax Astra (Cloud Cassandra)](#running-with-datastax-astra-cloud-cassandra)
-- [API Reference](#api-reference)
+- [Quick Start](#quick-start)
 - [Configuration Reference](#configuration-reference)
+- [API Reference](#api-reference)
 - [Tests](#tests)
 - [Code Quality](#code-quality)
 - [Postman Collection](#postman-collection)
@@ -265,41 +263,37 @@ The root project is an aggregator for shared build/lint tasks. Runnable Spring B
 
 ---
 
-## Run Locally (Host Apps + Docker Infra)
+## Quick Start
 
-This mode runs infrastructure with Docker and starts `consumer` / `producer` directly from Gradle.
+### Option A — Local IDEs + Docker Infra (Recommended for Development)
 
-### 1) Start infrastructure
+Perfect for debugging with IDE breakpoints and local hot-reload.
+
+**1) Start infrastructure:**
 
 ```bash
-cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
-docker compose up -d
+cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
+
+# Start with local Cassandra (default, recommended)
+docker compose -f docker-compose.dev.yml up -d
+
+# OR with Redis for session backend
+docker compose -f docker-compose.dev.yml --profile redis up -d
 ```
 
 This starts:
-- `redpanda` on `localhost:19092`
-- `cassandra` on `localhost:19042`
-- init jobs: `redpanda-init` (topics), `cassandra-init` (schema)
+- `redpanda` on `localhost:19092` (Kafka)
+- `cassandra` on `localhost:19042` (local database)
+- `redpanda-console` on `localhost:8080` (Kafka UI)
+- `redis` optional via `--profile redis`
 
-Redis is profile-based and does **not** start by default:
+> **Note:** Dev mode uses local Cassandra. For Astra (cloud), use Option B instead.
 
-```bash
-cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
-docker compose --profile redis up -d
-```
-
-Verify:
+**2) Run consumer from IDE (or Gradle):**
 
 ```bash
-docker compose ps -a
-```
+cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-### 2) Run consumer locally
-
-Use `APP_AUTH_ENABLED=true` if you need `/v1/auth/register` and `/v1/auth/login`.
-
-```bash
-cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
 APP_JWT_ISSUER=wikistream-local \
 APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
 APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
@@ -314,139 +308,59 @@ CASSANDRA_LOCAL_DATACENTER=datacenter1 \
 ./gradlew :cmd:consumer:bootRun
 ```
 
-Health check:
+**3) Run producer (separate terminal):**
+
+```bash
+cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 ./gradlew :cmd:producer:bootRun
+```
+
+**4) Health check:**
 
 ```bash
 curl http://localhost:7001/v1/status
 ```
 
-### 3) Run producer locally
+**5) Stop everything:**
 
 ```bash
-cd "/Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin"
-SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
-./gradlew :cmd:producer:bootRun
+# Easiest: use the helper script
+bash scripts/stop-local-apps.sh
+
+# Then stop Docker infrastructure
+docker compose -f docker-compose.dev.yml down
 ```
 
-### 4) Stop both local apps
-
-If both apps were started via Gradle (`:cmd:consumer:bootRun` and `:cmd:producer:bootRun`), stop them with:
+Or manually:
 
 ```bash
-pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun' 2>/dev/null || true
-pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun' 2>/dev/null || true
-kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true
+# Option A: Kill both apps by gradle process pattern
+pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun'
+pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun'
+
+# Option B: Kill both apps by listening port
+kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true  # Consumer on 7001
+
+# Then stop Docker infrastructure
+docker compose -f docker-compose.dev.yml down
 ```
 
-### 5) Most common local issues
-
-- `bootRun` stuck at `92% EXECUTING` is usually a running app waiting for requests (normal for long-running Spring tasks).
-- `Port 7001 was already in use`:
-
-```bash
-kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true
-```
-
-- `POST /v1/auth/register` returns `404`: set `APP_AUTH_ENABLED=true`.
-
-- `GET /v1/stats` returns `401`: login first and send `Authorization: Bearer <accessToken>`.
-
-- If `GET /v1/stats` still returns `401` with a token, refresh token via login (old token may be signed with a different JWT secret/issuer from a previous run).
-
-- `GET /v1/stats` returns zeros only: producer is not feeding events yet, or multiple consumer instances are running with `APP_SESSION_BACKEND=in-memory` (session state is per-instance).
-
-- Inspect running Gradle tasks and their listening ports (macOS/zsh):
-
-```bash
-(printf "%-8s | %-45s | %s\n" "PID" "TASK" "PORTS"; printf "%-8s-+-%-45s-+-%s\n" "--------" "---------------------------------------------" "-----"; ps -ax -o pid=,command= | grep 'org.gradle.appname=gradlew' | grep -v grep | while read -r pid cmd; do task=$(printf "%s" "$cmd" | sed -E 's#^.*gradle-wrapper\.jar[[:space:]]+##'); ports=$(pgrep -P "$pid" java | while read -r jpid; do lsof -nP -a -p "$jpid" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1{split($9,a,":"); print a[length(a)]}'; done | sort -u | paste -sd, -); [ -z "$ports" ] && ports="-"; printf "%-8s | %-45s | %s\n" "$pid" "$task" "$ports"; done)
-```
-
-- `POST /v1/auth/register` returns `500` with `unexpected_app_error`: fixed in current code; if seen, restart with latest build.
-
-For the full local walkthrough, see `readme_local_launch.md`.
+**Or simply:** Press `Ctrl+C` in each terminal where the apps are running.
 
 ---
 
-## Running with Docker Compose
+### Option B — Full Docker Stack (Production-like)
 
-`docker-compose.yml` is profile-based:
-- default (`docker compose up -d`): infra only (`redpanda`, `cassandra`, init jobs)
-- `redis` profile: optional Redis
-- `app` profile: `consumer` + `producer` containers
+All services containerized — Redpanda, Redis, Consumer, Producer, and Astra.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ docker compose up -d                                    │
-│ redpanda-init  -> wiki.recentchange.raw / .dlq topics   │
-│ cassandra-init -> keyspace/tables from schema.cql       │
-└──────────────────────────────────────────────────────────┘
-```
-
-### Start
+**1) Prepare Astra credentials (first time only):**
 
 ```bash
-docker compose up -d
+cp config/auth-secrets.properties.template config/auth-secrets.properties
+cp config/cassandra-secrets.properties.template config/cassandra-astra-secrets.properties
 ```
 
-With Redis too:
-
-```bash
-docker compose --profile redis up -d
-```
-
-Start app containers too:
-
-```bash
-docker compose --profile app up -d
-```
-
-### Verify
-
-```bash
-docker compose ps -a
-```
-
-### Redpanda (from host)
-
-The broker is reachable at `localhost:19092` for local tooling (e.g. `rpk`, Kafka UI):
-
-```bash
-docker exec wikistream-redpanda rpk topic list
-```
-
-### Inspect Cassandra
-
-```bash
-docker exec -it wikistream-cassandra cqlsh
-```
-
-```cql
-USE wikistream;
-SELECT email, active FROM user_accounts LIMIT 20;
-SELECT id, total_messages, distinct_users FROM stats_snapshots LIMIT 20;
-SELECT jti, email FROM revoked_tokens LIMIT 20;
-```
-
-### Stop
-
-```bash
-docker compose down
-```
-
----
-
-## Running with DataStax Astra (Cloud Cassandra)
-
-`docker-compose.astra.yml` replaces local Cassandra with DataStax Astra. Redpanda and Redis still run locally.
-
-### Step 1 — Prepare credentials
-
-```bash
-cp config/cassandra-secrets.properties.template config/cassandra-secrets.properties
-cp config/auth-secrets.properties.template      config/auth-secrets.properties
-```
-
-Edit `config/cassandra-secrets.properties`:
+Edit `config/cassandra-astra-secrets.properties`:
 
 ```properties
 spring.profiles.active=astra
@@ -456,38 +370,159 @@ ASTRA_DB_KEYSPACE=your-keyspace-name
 ASTRA_DB_LOCAL_DATACENTER=your-datacenter
 ```
 
-Place the Astra Secure Connect Bundle (`.zip`) in the `config/` directory.
+Place your `.zip` bundle in `config/`.
 
-### Step 2 — Create tables in Astra
+**2) Create schema in Astra (one-time):**
 
-In the Astra web UI → **Data Explorer** → run the DDL from `src/main/resources/db/cassandra/schema.cql`  
-(skip the `CREATE KEYSPACE` and `USE` lines — Astra manages keyspace creation).
+In Astra Web UI → **Data Explorer** → run DDL from `cmd/consumer/src/main/resources/db/cassandra/schema.cql`  
+(skip `CREATE KEYSPACE` and `USE` — Astra manages those).
 
-### Step 3 — Start
+**3) Start full stack:**
 
 ```bash
-docker compose -f docker-compose.astra.yml \
-  --profile "$(grep '^APP_SESSION_BACKEND=' .env | cut -d= -f2)" \
-  up --build
+cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
+
+# Default: Redis for sessions, Astra for database, consumer on 7001
+docker compose up --build -d
+
+# OR with in-memory sessions instead of Redis
+APP_SESSION_BACKEND=in-memory docker compose up --build -d
+
+# OR change consumer port
+CONSUMER_PORT=8000 docker compose up --build -d
 ```
 
-### Step 4 — Astra warm-up (if DB is hibernating)
+**4) Verify:**
+
+```bash
+docker compose ps
+
+# Health check
+curl http://localhost:7001/v1/status
+
+# Kafka topics
+docker exec wikistream-redpanda rpk topic list
+
+# Kafka UI
+open http://localhost:8080
+```
+
+**5) Astra warm-up (if DB hibernating):**
 
 ```bash
 bash scripts/astra-warmup-check.sh
 ```
 
-### Step 5 — Verify
+**6) Stop:**
 
 ```bash
-curl http://localhost:7000/v1/status
+docker compose down
 ```
 
-### Stop
+---
+
+## Configuration Reference
+
+### Supported Environments
+
+| Variable | Default | Where | Notes |
+|----------|---------|-------|-------|
+| `APP_AUTH_ENABLED` | `true` | Both | Enable `/v1/auth/*` endpoints |
+| `APP_SESSION_BACKEND` | `redis` (full stack), `in-memory` (dev) | Both | Session storage: `redis` or `in-memory` |
+| `CONSUMER_PORT` | `7001` | Full stack only | Host port for consumer (container always 7000) |
+| `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Dev only | Redpanda broker endpoint |
+| `CASSANDRA_CONTACT_POINTS` | `127.0.0.1` | Dev only | Cassandra host |
+| `CASSANDRA_PORT` | `19042` | Dev only | Cassandra port (19042 in Docker) |
+
+### Secrets Files
+
+| File | Template | Used by | Purpose |
+|------|----------|---------|---------|
+| `config/auth-secrets.properties` | `*.template` | Both | JWT secret, issuer, TTL |
+| `config/cassandra-astra-secrets.properties` | `*.template` | Full stack | Astra credentials + bundle path |
+
+---
+
+## Running with Local Cassandra (Optional)
+
+If you prefer local Homebrew Cassandra instead of Docker:
 
 ```bash
-docker compose -f docker-compose.astra.yml down
+# Install
+brew services start cassandra
+brew services start kafka  # if using Kafka instead of Redpanda
+
+# Initialize schema once
+cqlsh 127.0.0.1 9042 -f cmd/consumer/src/main/resources/db/cassandra/schema.cql
+
+# Run consumer with local endpoints
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+CASSANDRA_CONTACT_POINTS=127.0.0.1 \
+CASSANDRA_PORT=9042 \
+./gradlew :cmd:consumer:bootRun
 ```
+
+---
+
+## Troubleshooting
+
+### Dev Stack Issues
+
+- **Consumer hangs at startup:**
+  - Ensure `docker compose -f docker-compose.dev.yml up -d` succeeded
+  - Check: `docker compose -f docker-compose.dev.yml ps`
+  - Wait ~60s for Cassandra health checks to pass
+
+- **Port already in use:**
+
+```bash
+# Consumer on 7001
+kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true
+
+# Redpanda on 19092
+kill $(lsof -tiTCP:19092 -sTCP:LISTEN) 2>/dev/null || true
+```
+
+- **Kill local gradle apps (consumer and producer):**
+
+When running `./gradlew :cmd:consumer:bootRun` and `./gradlew :cmd:producer:bootRun` locally, use:
+
+```bash
+# Easiest: use the helper script
+bash scripts/stop-local-apps.sh
+
+# OR by gradle process pattern
+pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun'
+pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun'
+
+# OR by listening port
+kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true    # Consumer on 7001
+```
+
+- **Test with wrong JWT secret:**
+  - Old tokens signed with different secret will fail
+  - Login again to get new token
+
+### Full Stack Issues
+
+- **Containers fail to start:**
+
+```bash
+docker compose logs consumer    # Check app logs
+docker compose logs producer
+docker compose logs redpanda
+```
+
+- **Astra connection refused:**
+  - Verify bundle path in `config/cassandra-astra-secrets.properties`
+  - Verify token format: `AstraCS:...`
+  - Try warm-up: `bash scripts/astra-warmup-check.sh`
+
+---
+
+## Further Reading (Dev Guides)
+
+For detailed setup steps, see `readme_local_launch.md` for comprehensive troubleshooting and IDE configuration.
 
 ---
 
@@ -543,38 +578,46 @@ curl http://localhost:7000/v1/stats \
 
 ---
 
-## Configuration Reference
+## Application Configuration Details
 
-### Producer — `cmd/producer/src/main/resources/application.properties`
+### Producer Application
 
-| Property | Default | Env override |
-|----------|---------|--------------|
-| `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` |
-| `wiki.stream.url` | Wikimedia SSE URL | — |
-| `wiki.stream.user-agent` | `wikistream-producer/local` | — |
+**File:** `cmd/producer/src/main/resources/application.properties`
 
-### Consumer — `cmd/consumer/src/main/resources/application.properties`
+| Property | Default | Env override | Notes |
+|----------|---------|--------------|-------|
+| `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | Redpanda broker |
+| `wiki.stream.url` | `https://stream.wikimedia.org/v2/stream/recentchange` | — | Wikimedia SSE endpoint |
+| `wiki.stream.user-agent` | `wikistream-producer/local` | — | User-Agent header for SSE |
 
-| Property | Default | Env override |
-|----------|---------|--------------|
-| `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` |
-| `spring.kafka.consumer.group-id` | `wiki-consumer` | — |
-| `spring.kafka.consumer.max-poll-records` | `50` | — |
-| `spring.cassandra.contact-points` | `localhost` | `CASSANDRA_CONTACT_POINTS` |
-| `spring.cassandra.port` | `9042` | `CASSANDRA_PORT` |
-| `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` |
-| `spring.data.redis.host` | `localhost` | `SPRING_DATA_REDIS_HOST` |
-| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` |
-| `app.session.backend` | `redis` | `APP_SESSION_BACKEND` |
-| `app.auth.enabled` | `true` | `APP_AUTH_ENABLED` |
-| `app.security.jwt.secret` | _(required)_ | via `config/auth-secrets.properties` |
+### Consumer Application
 
-### Secrets files (git-ignored)
+**File:** `cmd/consumer/src/main/resources/application.properties`
 
-| File | Template | Purpose |
-|------|----------|---------|
-| `config/auth-secrets.properties` | `*.template` | JWT issuer, secret, TTL |
-| `config/cassandra-secrets.properties` | `*.template` | Astra bundle path + token |
+| Property | Default | Env override | Notes |
+|----------|---------|--------------|-------|
+| `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | Redpanda broker |
+| `spring.kafka.consumer.group-id` | `wiki-consumer` | — | Kafka consumer group |
+| `spring.kafka.consumer.max-poll-records` | `50` | — | Batch size |
+| `spring.cassandra.contact-points` | `localhost` | `CASSANDRA_CONTACT_POINTS` | Local: `127.0.0.1` or `cassandra` (Docker) |
+| `spring.cassandra.port` | `9042` | `CASSANDRA_PORT` | Docker maps container 9042 → host 19042 |
+| `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` | Keyspace name |
+| `spring.cassandra.local-datacenter` | `datacenter1` | `CASSANDRA_LOCAL_DATACENTER` | Required for driver |
+| `spring.data.redis.host` | `localhost` | `SPRING_DATA_REDIS_HOST` | Redis host (set to `redis` in Docker) |
+| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` | Redis port |
+| `server.port` | `7000` | `SERVER_PORT` | HTTP server port |
+| `app.session.backend` | `redis` | `APP_SESSION_BACKEND` | Session storage: `redis` or `in-memory` |
+| `app.auth.enabled` | `true` | `APP_AUTH_ENABLED` | Enable/disable auth endpoints |
+| `app.security.jwt.issuer` | _(required)_ | `APP_JWT_ISSUER` | JWT issuer claim |
+| `app.security.jwt.secret` | _(required)_ | `APP_JWT_SECRET` | JWT signing secret (≥32 chars) |
+| `app.security.jwt.access-token-ttl-seconds` | `3600` | `APP_JWT_ACCESS_TOKEN_TTL_SECONDS` | Token expiry (seconds) |
+
+### Secrets Files (git-ignored)
+
+| File | Template | When needed | Purpose |
+|------|----------|-------------|---------|
+| `config/auth-secrets.properties` | `*.template` | Always | JWT secrets, issuer, TTL — for both dev and production |
+| `config/cassandra-astra-secrets.properties` | `*.template` | Astra only | Astra credentials: token, bundle path, keyspace, datacenter |
 
 ---
 

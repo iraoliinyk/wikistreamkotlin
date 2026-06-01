@@ -1,20 +1,19 @@
-# ─── Production/Demo Stack ────────────────────────────────────────────────────
-# Full stack: Redpanda, Astra (cloud Cassandra), Redis, Consumer app, Producer app
+# ─── Development Mode: Infrastructure Only ────────────────────────────────────
+# For running apps locally from IDE with Docker-based infra.
 #
-# Features:
-#   - Uses DataStax Astra for cloud Cassandra (requires config/cassandra-astra-secrets.properties)
-#   - Redis enabled by default (configurable via APP_SESSION_BACKEND)
-#   - Consumer + Producer apps include by default
-#   - Redpanda Console for topic monitoring
+# Supports:
+#   - Cassandra: local cassandra:5.0
+#   - Astra: DataStax Astra (cloud) — requires config/cassandra-astra-secrets.properties
+#   - Session backend: Redis or in-memory
 #
-# Usage:
-#   docker compose up --build -d          # Full stack with defaults
-#   docker compose down                   # Stop everything
+# Example usage:
+#   docker compose -f docker-compose.dev.yml up -d                 # local cassandra (default)
+#   docker compose -f docker-compose.dev.yml --profile redis up -d # with Redis
+#   CASSANDRA_MODE=astra docker compose -f docker-compose.dev.yml up -d  # switch to Astra
 #
-# Environment variables:
-#   APP_AUTH_ENABLED             default: true
-#   APP_SESSION_BACKEND          default: redis (or set to in-memory)
-#   CONSUMER_PORT                default: 7001
+# ─── Profiles ──────────────────────────────────────────────────────────────────
+# redis:       Optional Redis for session backend (off by default = in-memory)
+# cassandra:   Local Cassandra (on by default, unless CASSANDRA_MODE=astra)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -65,10 +64,41 @@ services:
         rpk topic create wiki.recentchange.dlq --brokers redpanda:9092 --partitions 1 --replicas 1 || true
     restart: "no"
 
-  # ── Redis ──────────────────────────────────────────────────────────────────
+  # ── Cassandra (local development mode) ──────────────────────────────────────
+  # NOTE: Cassandra always starts in dev mode. For Astra, use docker-compose.yml instead.
+  cassandra:
+    image: cassandra:5.0
+    container_name: wikistream-cassandra
+    ports:
+      - "19042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: wikistream-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  cassandra-init:
+    image: cassandra:5.0
+    container_name: wikistream-cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./cmd/consumer/src/main/resources/db/cassandra/schema.cql:/schema.cql:ro
+    entrypoint: ["/bin/sh", "-c", "cqlsh cassandra 9042 -f /schema.cql"]
+    restart: "no"
+
+  # ── Redis (optional — only when needed for session backend) ─────────────────
   redis:
     image: redis:7-alpine
     container_name: wikistream-redis
+    profiles: ["redis"]
     ports:
       - "6379:6379"
     healthcheck:
@@ -92,39 +122,3 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
-  # ─── Application services ──────────────────────────────────────────────────
-  consumer:
-    container_name: wikistream-consumer
-    image: wikistream-consumer:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.consumer
-    depends_on:
-      redpanda-init:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./config:/app/config:ro
-    environment:
-      APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
-      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND:-redis}
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: 6379
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-    ports:
-      - "${CONSUMER_PORT:-7001}:7000"
-    restart: unless-stopped
-
-  producer:
-    container_name: wikistream-producer
-    image: wikistream-producer:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.producer
-    depends_on:
-      redpanda-init:
-        condition: service_completed_successfully
-    environment:
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-    restart: unless-stopped
