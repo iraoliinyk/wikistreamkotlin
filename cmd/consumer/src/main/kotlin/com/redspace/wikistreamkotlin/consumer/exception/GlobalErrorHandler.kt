@@ -1,6 +1,7 @@
 package com.redspace.wikistreamkotlin.consumer.exception
 
 import com.redspace.wikistreamkotlin.core.exception.AppError
+import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import com.redspace.wikistreamkotlin.core.exception.HttpAppError
 import com.redspace.wikistreamkotlin.core.exception.UnexpectedAppError
 import org.springframework.http.HttpStatus
@@ -15,14 +16,14 @@ import java.time.Instant
 
 @RestControllerAdvice
 class GlobalErrorHandler(
-    private val appErrorLogger: AppErrorLogger,
+    private val errorLogger: ErrorLogger,
 ) {
     @ExceptionHandler(AppError::class)
     fun handleAppError(
         error: AppError,
         request: ServerHttpRequest,
     ): ProblemDetail {
-        appErrorLogger.log(error, context = mapOf("path" to request.path.value()))
+        errorLogger.log(error, context = mapOf("path" to request.path.value()))
         return error.toProblemDetail(request)
     }
 
@@ -53,7 +54,7 @@ class GlobalErrorHandler(
                 message = "Unexpected error while processing request",
                 cause = exception,
             )
-        appErrorLogger.log(error, context = mapOf("path" to request.path.value()))
+        errorLogger.log(error, context = mapOf("path" to request.path.value()))
         return error.toProblemDetail(request)
     }
 

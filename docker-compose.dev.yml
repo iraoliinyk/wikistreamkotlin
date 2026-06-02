@@ -2,18 +2,33 @@
 # For running apps locally from IDE with Docker-based infra.
 #
 # Supports:
-#   - Cassandra: local cassandra:5.0
+#   - Cassandra: local cassandra:5.0 (default)
 #   - Astra: DataStax Astra (cloud) — requires config/cassandra-astra-secrets.properties
 #   - Session backend: Redis or in-memory
 #
 # Example usage:
 #   docker compose -f docker-compose.dev.yml up -d                 # local cassandra (default)
 #   docker compose -f docker-compose.dev.yml --profile redis up -d # with Redis
-#   CASSANDRA_MODE=astra docker compose -f docker-compose.dev.yml up -d  # switch to Astra
+#
+# ─── Switching Database Backends ────────────────────────────────────────────────
+# LOCAL CASSANDRA (default):
+#   docker compose -f docker-compose.dev.yml up -d
+#   CASSANDRA_CONTACT_POINTS=127.0.0.1 CASSANDRA_PORT=19042 ./gradlew :cmd:consumer:bootRun
+#
+# ASTRA CLOUD CASSANDRA:
+#   1. Prepare: cp config/cassandra-astra-secrets.properties.template config/cassandra-astra-secrets.properties
+#   2. Edit file with your Astra credentials (DB ID, region, token)
+#   3. Start infra: docker compose -f docker-compose.dev.yml up -d
+#   4. Run app: ./gradlew :cmd:consumer:bootRun
+#      (app auto-activates astra profile; see config/cassandra-astra-secrets.properties:1)
+#
+# NOTE: The cassandra service ALWAYS starts by default. It does NOT consume resources if apps
+#       use Astra (via spring.profiles.active=astra). To skip cassandra entirely, use profiles:
+#       docker compose -f docker-compose.dev.yml --profile cassandra down
+#       docker compose -f docker-compose.dev.yml up -d  # Skips cassandra
 #
 # ─── Profiles ──────────────────────────────────────────────────────────────────
 # redis:       Optional Redis for session backend (off by default = in-memory)
-# cassandra:   Local Cassandra (on by default, unless CASSANDRA_MODE=astra)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -65,7 +80,9 @@ services:
     restart: "no"
 
   # ── Cassandra (local development mode) ──────────────────────────────────────
-  # NOTE: Cassandra always starts in dev mode. For Astra, use docker-compose.yml instead.
+  # Starts by default. Apps using Astra (spring.profiles.active=astra) will ignore this.
+  # To skip Cassandra entirely: docker compose -f docker-compose.dev.yml down && \
+  #                             docker compose -f docker-compose.dev.yml up -d
   cassandra:
     image: cassandra:5.0
     container_name: wikistream-cassandra
@@ -110,7 +127,7 @@ services:
 
   # ── Redpanda Console (UI for monitoring) ───────────────────────────────────
   redpanda-console:
-    image: redpandadata/console:latest
+    image: redpandadata/console:v0.24.0
     container_name: wikistream-redpanda-console
     depends_on:
       redpanda-init:

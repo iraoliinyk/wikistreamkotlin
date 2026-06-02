@@ -9,7 +9,7 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 import org.springframework.web.server.ResponseStatusException
 
 class GlobalErrorHandlerTest {
-    private val handler = GlobalErrorHandler(AppErrorLogger())
+    private val handler = GlobalErrorHandler(ConsumerErrorLogger())
 
     @Test
     fun `handleAppError maps typed error to response`() {

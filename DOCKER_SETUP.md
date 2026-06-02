@@ -20,22 +20,54 @@ This document explains the two Docker Compose configurations in this project.
 - Hot reload code changes  
 - Test locally with minimal dependencies
 
-### What starts
+### What starts (default: local Cassandra)
 - **Redpanda** (Kafka broker) on `localhost:19092`
-- **Cassandra** 5.0 on `localhost:19042` (always included)
+- **Cassandra** 5.0 on `localhost:19042` (starts by default)
 - **Redis** (optional via `--profile redis`)
 - **Redpanda Console** (Kafka UI) on `localhost:8080`
 
 ### Database Mode
 
-**Local Cassandra (default and recommended)**
+**Local Cassandra (default - recommended)**
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
+This starts the full local stack including Cassandra. Run apps locally from IDE pointing to `localhost:19042`:
+```bash
+CASSANDRA_CONTACT_POINTS=127.0.0.1 \
+CASSANDRA_PORT=19042 \
+./gradlew :cmd:consumer:bootRun
+```
 
 **For Astra (cloud Cassandra)**
-- Use the full `docker-compose.yml` instead, which is configured for Astra
-- Dev mode is designed for fast local iteration with Cassandra
+
+Astra is a fully-managed cloud Cassandra service. To use it instead of local Cassandra:
+
+**Step 1: Prepare credentials (one-time)**
+```bash
+cp config/cassandra-astra-secrets.properties.template config/cassandra-astra-secrets.properties
+# Edit with your Astra DB ID, region, and token
+```
+
+**Step 2: Start infrastructure (same command as local Cassandra)**
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+The Cassandra container will start, but your app will ignore it and connect to cloud instead.
+
+**Step 3: Run consumer locally - it auto-activates Astra profile**
+```bash
+./gradlew :cmd:consumer:bootRun
+```
+How it works: `config/cassandra-astra-secrets.properties` contains `spring.profiles.active=astra` (line 1), which automatically:
+- Ignores local Cassandra settings
+- Activates the `astra` Spring profile
+- Uses cloud Cassandra credentials from that file
+- Works whether local Cassandra container is running or not
+
+**Why keep both?** The `docker-compose.dev.yml` is agnostic to your database choice. The decision is made purely through:
+- `config/cassandra-astra-secrets.properties` existence and content (triggers Astra profile)
+- App environment (local Cassandra env vars = local mode, Astra secrets file = cloud mode)
 
 ### Session Backend Options
 
@@ -241,19 +273,49 @@ docker compose up --build -d
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 # Run apps locally pointing to localhost:19042
+CASSANDRA_CONTACT_POINTS=127.0.0.1 CASSANDRA_PORT=19042 ./gradlew :cmd:consumer:bootRun
 ```
 
-**Dev mode: Switch to Astra**
+**Dev mode: Switch to Astra (same infra, different app config)**
 ```bash
-CASSANDRA_MODE=astra docker compose -f docker-compose.dev.yml up -d
-# Still run apps locally, but they'll use Astra
+# Ensure config/cassandra-astra-secrets.properties exists with your Astra credentials
+docker compose -f docker-compose.dev.yml up -d  # Same command; local Cassandra still starts
+# App auto-activates astra profile (from secrets file); connects to cloud, ignores local Cassandra
+./gradlew :cmd:consumer:bootRun
 ```
+
+**Why does local Cassandra start even when using Astra?**
+- The compose file is unaware of which database your app will use
+- Docker Compose profiles would add complexity (see header of docker-compose.dev.yml for technical details)
+- Local Cassandra container uses minimal resources when unused
+- This design keeps dev and prod infra setup identical and composable
 
 **Full stack: Always uses Astra**
 ```bash
 docker compose up -d
 # Consumer and producer run in containers, both use Astra
 ```
+
+---
+
+## Image Version Pinning
+
+All external dependencies are pinned to specific versions for reproducibility and stability:
+
+| Service | Version | Notes |
+|---------|---------|-------|
+| Redpanda Broker | v24.3.14 | Stable, well-tested |
+| Redpanda Console | v0.24.0 | UI for topic monitoring; pinned to prevent breaking changes |
+| Cassandra | 5.0 | Major version pinned for compatibility |
+| Redis | 7-alpine | Major version pinned; lightweight Alpine image |
+
+**Why version pinning?**
+- **Reproducibility:** Same setup across developers, CI/CD, and production
+- **Stability:** No unexpected breaking changes from automatic updates
+- **Debugging:** Can pinpoint issues to specific versions
+- **Security:** Can review release notes before upgrading
+
+**Note:** Local app images (`wikistream-consumer`, `wikistream-producer`) use `latest` because they're built from your current codebase.
 
 ---
 

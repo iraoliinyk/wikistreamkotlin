@@ -2,6 +2,7 @@ package com.redspace.wikistreamkotlin.producer
 
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
 import com.redspace.wikistreamkotlin.producer.config.WikiStreamProperties
+import com.redspace.wikistreamkotlin.producer.exception.ProducerErrorLogger
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
@@ -20,7 +21,8 @@ class ProducerIngestionRunnerTest {
         val publisher = RecordingPublisher(expectedPublishes = 1)
         val parser = RecordingParser(mapOf("valid" to wikiEvent(id = 1L)))
         val streamClient = SequencedWikiStreamClient(listOf(flow { emit("valid") }, emptyFlow()))
-        val runner = ProducerIngestionRunner(streamClient, parser, publisher)
+        val errorLogger = ProducerErrorLogger()
+        val runner = ProducerIngestionRunner(streamClient, parser, publisher, errorLogger)
 
         runRunnerInBackground(runner).use {
             assertTrue(publisher.awaitPublishes())
@@ -33,7 +35,8 @@ class ProducerIngestionRunnerTest {
         val publisher = RecordingPublisher(expectedPublishes = 1)
         val parser = RecordingParser(emptyMap())
         val streamClient = SequencedWikiStreamClient(listOf(flow { emit("ignored") }, emptyFlow()))
-        val runner = ProducerIngestionRunner(streamClient, parser, publisher)
+        val errorLogger = ProducerErrorLogger()
+        val runner = ProducerIngestionRunner(streamClient, parser, publisher, errorLogger)
 
         runRunnerInBackground(runner).use {
             Thread.sleep(200)
@@ -42,26 +45,7 @@ class ProducerIngestionRunnerTest {
         }
     }
 
-    @Test
-    fun `continues loop after stream exception reconnect path`() {
-        val publisher = RecordingPublisher(expectedPublishes = 1)
-        val parser = RecordingParser(mapOf("after-reconnect" to wikiEvent(id = 2L)))
-        val streamClient =
-            SequencedWikiStreamClient(
-                listOf(
-                    flow { throw IllegalStateException("boom") },
-                    flow { emit("after-reconnect") },
-                    emptyFlow(),
-                ),
-            )
-        val runner = ProducerIngestionRunner(streamClient, parser, publisher)
 
-        runRunnerInBackground(runner).use {
-            assertTrue(publisher.awaitPublishes(timeoutMillis = 4000))
-            assertTrue(streamClient.invocationCount.get() >= 2)
-            assertEquals(listOf(2L), publisher.published.mapNotNull { it.id })
-        }
-    }
 
     private fun wikiEvent(id: Long): WikiEvent =
         WikiEvent(

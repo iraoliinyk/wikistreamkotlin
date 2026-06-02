@@ -1,22 +1,19 @@
 package com.redspace.wikistreamkotlin.consumer.exception
 
 import com.redspace.wikistreamkotlin.core.exception.AppError
+import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
+import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
-enum class AppErrorLogLevel {
-    WARN,
-    ERROR,
-}
-
 @Component
-class AppErrorLogger {
-    private val logger = LoggerFactory.getLogger(AppErrorLogger::class.java)
+class ConsumerErrorLogger : ErrorLogger {
+    private val logger = LoggerFactory.getLogger(ConsumerErrorLogger::class.java)
 
-    fun log(
+    override fun log(
         error: AppError,
-        level: AppErrorLogLevel = AppErrorLogLevel.ERROR,
-        context: Map<String, Any?> = emptyMap(),
+        level: ErrorLogLevel,
+        context: Map<String, Any?>
     ) {
         val throwable = error.cause ?: error
         val contextPart =
@@ -33,8 +30,8 @@ class AppErrorLogger {
                 "exception=${throwable::class.qualifiedName}$contextPart"
 
         when (level) {
-            AppErrorLogLevel.WARN -> logger.warn(message, throwable)
-            AppErrorLogLevel.ERROR -> logger.error(message, throwable)
+            ErrorLogLevel.WARN -> logger.warn(message, throwable)
+            ErrorLogLevel.ERROR -> logger.error(message, throwable)
         }
     }
 }

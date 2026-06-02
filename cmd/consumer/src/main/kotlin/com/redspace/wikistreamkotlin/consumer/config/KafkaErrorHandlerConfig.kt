@@ -1,8 +1,8 @@
 package com.redspace.wikistreamkotlin.consumer.config
 
 import com.fasterxml.jackson.core.JsonProcessingException
-import com.redspace.wikistreamkotlin.consumer.exception.AppErrorLogLevel
-import com.redspace.wikistreamkotlin.consumer.exception.AppErrorLogger
+import com.redspace.wikistreamkotlin.consumer.exception.ConsumerErrorLogger
+import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
 import com.redspace.wikistreamkotlin.core.exception.KafkaProcessingError
 import com.redspace.wikistreamkotlin.core.exception.MalformedKafkaRecordError
 import org.springframework.context.annotation.Bean
@@ -11,19 +11,19 @@ import org.springframework.kafka.listener.DefaultErrorHandler
 
 @Configuration
 class KafkaErrorHandlerConfig(
-    private val appErrorLogger: AppErrorLogger,
+    private val consumerErrorLogger: ConsumerErrorLogger,
 ) {
     @Bean
     fun kafkaErrorHandler(): DefaultErrorHandler {
         return DefaultErrorHandler { record, exception ->
             when (exception) {
                 is JsonProcessingException -> {
-                    appErrorLogger.log(
+                    consumerErrorLogger.log(
                         error = MalformedKafkaRecordError(
                             message = "Failed to parse Kafka record in error handler",
                             cause = exception,
                         ),
-                        level = AppErrorLogLevel.WARN,
+                        level = ErrorLogLevel.WARN,
                         context = mapOf(
                             "topic" to record.topic(),
                             "partition" to record.partition(),
@@ -33,12 +33,12 @@ class KafkaErrorHandlerConfig(
                     // Don't retry - skip this record
                 }
                 else -> {
-                    appErrorLogger.log(
+                    consumerErrorLogger.log(
                         error = KafkaProcessingError(
                             message = "Kafka processing failed",
                             cause = exception,
                         ),
-                        level = AppErrorLogLevel.ERROR,
+                        level = ErrorLogLevel.ERROR,
                         context = mapOf(
                             "topic" to record.topic(),
                             "offset" to record.offset(),

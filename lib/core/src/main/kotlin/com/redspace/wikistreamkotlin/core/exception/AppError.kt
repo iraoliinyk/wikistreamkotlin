@@ -158,3 +158,42 @@ class KafkaProcessingError(
     message = message,
     cause = cause,
 )
+
+/**
+* Error when SSE stream fails after max retries.
+* Indicates upstream data source is unavailable.
+*/
+class ProducerStreamError(
+    message: String,
+    cause: Throwable? = null,
+) : AppError(
+    type = "producer_stream_error",
+    message = message,
+    cause = cause,
+)
+
+/**
+ * Error when Kafka publishing fails.
+ * Indicates downstream broker is unavailable or rejection.
+ */
+class ProducerPublishError(
+    message: String,
+    cause: Throwable? = null,
+) : AppError(
+    type = "producer_publish_error",
+    message = message,
+    cause = cause,
+)
+
+/**
+ * Error when event parsing fails.
+ * Indicates malformed upstream data.
+ */
+class ProducerParsingError(
+    message: String,
+    cause: Throwable? = null,
+) : AppError(
+    type = "producer_parsing_error",
+    message = message,
+    cause = cause,
+)

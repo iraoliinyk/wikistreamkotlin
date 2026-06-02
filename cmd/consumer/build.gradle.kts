@@ -72,18 +72,17 @@ kotlin {
 }
 
 // ---------------------------------------------------------------------------
-// integrationTest — requires Docker + running Cassandra (and Redis) containers
-//   Start services first:  docker compose up -d
-//   Run tests:             ./gradlew integrationTest
-//   Stop services:         docker compose down
+// integrationTest — requires Docker daemon (Testcontainers provisions dependencies)
+//   Run tests:  ./gradlew integrationTest
+//   Testcontainers will automatically provision: Cassandra, Redis, Redpanda
 // ---------------------------------------------------------------------------
 tasks.register<Test>("integrationTest") {
     group = "ci"
     description =
         """
         Runs integration tests only.
-        ⚠️  Requires Docker and running Cassandra/Redis containers.
-        Start them with: docker compose up -d
+        ⚠️  Requires Docker daemon.
+        Testcontainers automatically provisions Cassandra, Redis, and Redpanda.
         """.trimIndent()
     useJUnitPlatform()
     testClassesDirs = integrationTestSourceSet.output.classesDirs
@@ -107,7 +106,7 @@ tasks.register<Test>("integrationTest") {
                 false
             }
         require(dockerAvailable) {
-            "integrationTest requires Docker. Please start Docker and run: docker compose up -d"
+            "integrationTest requires Docker daemon. Please start Docker and try again."
         }
         logger.lifecycle("🐳 Docker detected — proceeding with integration tests.")
     }
