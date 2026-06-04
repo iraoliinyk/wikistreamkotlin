@@ -1,16 +1,17 @@
 package com.redspace.wikistreamkotlin.producer.config
 
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
+import com.redspace.wikistreamkotlin.producer.exception.ProducerErrorLogger
+import com.redspace.wikistreamkotlin.producer.serializer.ProtoWikiEventSerializer
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.StringSerializer
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import org.springframework.kafka.core.DefaultKafkaProducerFactory
-import org.springframework.kafka.support.serializer.JacksonJsonSerializer
 
 class ProducerKafkaConfigTest {
-    private val config = ProducerKafkaConfig("localhost:19092")
+    private val config = ProducerKafkaConfig("localhost:19092", ProducerErrorLogger())
 
     @Test
     fun `producer props include idempotence retries and compression`() {
@@ -25,19 +26,13 @@ class ProducerKafkaConfigTest {
     }
 
     @Test
-    fun `serializer setup uses StringSerializer and JacksonJsonSerializer`() {
+    fun `serializer setup uses StringSerializer and ProtoWikiEventSerializer`() {
         val producerFactory = config.wikiEventProducerFactory() as DefaultKafkaProducerFactory<String, WikiEvent>
         val props = producerFactory.configurationProperties
 
-        assertEquals(StringSerializer::class.java, props[ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG])
-        assertEquals(JacksonJsonSerializer::class.java, props[ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG])
-    }
-
-    @Test
-    fun `type headers are disabled`() {
-        val producerFactory = config.wikiEventProducerFactory() as DefaultKafkaProducerFactory<String, WikiEvent>
-        val props = producerFactory.configurationProperties
-
-        assertFalse(props[JacksonJsonSerializer.ADD_TYPE_INFO_HEADERS] as Boolean)
+        assertNull(props[ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG])
+        assertNull(props[ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG])
+        assertEquals(StringSerializer::class.java, producerFactory.keySerializerSupplier!!.get()!!::class.java)
+        assertEquals(ProtoWikiEventSerializer::class.java, producerFactory.valueSerializerSupplier!!.get()!!::class.java)
     }
 }

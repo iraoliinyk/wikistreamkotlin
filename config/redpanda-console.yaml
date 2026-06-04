@@ -1,0 +1,18 @@
+# Redpanda Console configuration with protobuf deserialization
+# Topics have been purged of old JSON messages — only protobuf from now on.
+
+kafka:
+  brokers:
+    - redpanda:9092
+  protobuf:
+    enabled: true
+    mappings:
+      - topicName: "wiki.recentchange.raw"
+        valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
+      - topicName: "wiki.recentchange.dlq"
+        valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
+    fileSystem:
+      enabled: true
+      refreshInterval: 5m
+      paths:
+        - "/etc/proto"

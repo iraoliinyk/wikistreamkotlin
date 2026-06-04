@@ -1,0 +1,189 @@
+// wikievent.proto v1.0
+// Last Modified: 2026-06-03
+// Compatibility: Initial release, backwards compatible with future proto3 versions
+//
+// This file defines protobuf messages for Wikipedia event streaming.
+// Schema evolution is carefully managed to maintain compatibility across consumers.
+//
+// CHANGELOG:
+// - v1.0 (2026-06-03): Initial release
+//   - WikiEventMeta: fields 1-9
+//   - WikiEvent: fields 1-35
+
+syntax = "proto3";
+
+package com.redspace.wikistreamkotlin.proto;
+
+option java_outer_classname = "WikiEventProto";
+option java_package = "com.redspace.wikistreamkotlin.proto";
+option java_multiple_files = true;
+
+// ============================================================================
+// WikiEventMeta - Metadata about event processing and Kafka context
+// ============================================================================
+// Contains information about how the event was processed through the system,
+// including Kafka topic, partition, and offset information.
+//
+// Field numbering strategy for WikiEventMeta:
+// - 1-5: Core identifiers and URIs
+// - 6-9: Processing context (stream, topic, partition)
+message WikiEventMeta {
+    // URI for this event in the source system
+    // Represents the resource URL where the event originated
+    string uri = 1;
+
+    // Unique request identifier for tracing and correlation
+    // Can be empty string if not available
+    // Reserved for future use in distributed tracing
+    optional string request_id = 2;
+
+    // Unique identifier for this metadata record
+    // Must not be empty; serves as primary key for processing
+    string id = 3;
+
+    // Domain name associated with the event
+    // Examples: "en.wikipedia.org", "de.wikipedia.org"
+    // Can be empty for synthetic events
+    optional string domain = 4;
+
+    // Stream name or topic category
+    // Examples: "revisions", "pagelinks", "page-properties-change"
+    optional string stream = 5;
+
+    // Timestamp in ISO 8601 format (UTC)
+    // Format: "2026-06-03T10:00:00Z"
+    // Can be empty if not available
+    optional string dt = 6;
+
+    // Kafka topic where the event was published
+    // Examples: "mediawiki.revision-create", "eqiad.mediawiki.recentchange"
+    optional string topic = 7;
+
+    // Kafka partition number where the event resides
+    // Can be empty for non-Kafka streams
+    optional string partition = 8;
+
+    // Kafka offset (record position in partition)
+    // Monotonically increasing within a partition
+    // Can be 0 or unset if not Kafka-sourced
+    optional int64 offset = 9;
+}
+
+// ============================================================================
+// WikiEvent - Main domain model for Wikipedia edit events
+// ============================================================================
+// Represents a single change event in Wikipedia, containing all details about
+// the edit including user, content, and target article information.
+//
+// Field numbering strategy for WikiEvent:
+// - 1-5: Core event identifiers and schema version
+// - 6-10: Target object (page/namespace information)
+// - 11-15: User and bot classification
+// - 16-20: Edit comments and content
+// - 21-25: Timestamps and event type
+// - 26-30: URLs (article, notification, server)
+// - 31-35: Server configuration
+//
+// Reserved field space: 51-100 (for future removals)
+message WikiEvent {
+    // Schema identifier for event versioning
+    // Indicates which event schema version this conforms to
+    // Example: "mediawiki.revision-create/1.0.0"
+    optional string schema = 1;
+
+    // Metadata about event processing
+    // Contains Kafka/stream context and tracing information
+    WikiEventMeta meta = 2;
+
+    // Unique event identifier
+    // Unique within a stream; used for idempotency
+    optional int64 id = 3;
+
+    // Type of change that occurred
+    // Common values: "edit", "new", "categorize", "move", "delete"
+    // Can be extended with custom event types
+    optional string type = 4;
+
+    // Wikipedia namespace integer
+    // 0 = article, 1 = talk, 2 = user, etc.
+    // See: https://www.mediawiki.org/wiki/Namespace
+    optional int32 namespace = 5;
+
+    // Title of the edited article (page name)
+    // Does not include namespace prefix
+    // Example: "Albert Einstein" (for "Biography" namespace)
+    optional string title = 6;
+
+    // URL-encoded version of the title
+    // Ready for use in URLs without additional encoding
+    // Example: "Albert_Einstein"
+    optional string title_url = 7;
+
+    // Edit summary provided by the editor
+    // Raw text as entered; may contain wiki markup
+    // Can be empty for edits without summary
+    optional string comment = 8;
+
+    // Edit timestamp as Unix milliseconds (UTC)
+    // Number of milliseconds since 1970-01-01T00:00:00Z
+    // Used for ordering events chronologically
+    optional int64 timestamp = 9;
+
+    // Registered username or IP address
+    // Username for logged-in users, IPv4/IPv6 for anonymous edits
+    // Can be empty for system-generated events
+    optional string user = 10;
+
+    // Boolean flag indicating if edit was made by a bot
+    // True if performing automated edits (requires bot flag)
+    // False for human editors
+    // Can be unset (treated as false)
+    bool bot = 11;
+
+    // URL linking to event notification on Wikipedia
+    // Allows UI to link directly to the change notification
+    // Can be empty if no notification exists
+    optional string notify_url = 12;
+
+    // Base server URL
+    // Example: "https://en.wikipedia.org"
+    // Used with script paths to construct full URLs
+    optional string server_url = 13;
+
+    // Server hostname/domain name
+    // Example: "en.wikipedia.org"
+    // Can differ from derived domain (e.g., CDN vs origin)
+    optional string server_name = 14;
+
+    // MediaWiki script path on server
+    // Example: "/w" (so /w/api.php is available)
+    // Contains base path for API and wiki access
+    optional string server_script_path = 15;
+
+    // Wiki identifier (database abbreviation)
+    // Examples: "enwiki", "dewiki", "frwiki"
+    // Matches directory structure in MediaWiki installs
+    optional string wiki = 16;
+
+    // Parsed/formatted version of edit comment
+    // HTML-safe or wiki-markup processed version of comment
+    // Sanitized for safe display in UIs
+    optional string parsedcomment = 17;
+
+    // ========================================================================
+    // Reserved Fields (Schema Evolution)
+    // ========================================================================
+    // These field numbers have been reserved for deprecated fields to prevent
+    // accidental reuse and maintain schema stability across versions.
+    // DO NOT use these field numbers for new features.
+    //
+    // When removing a field, add it to this reserved section:
+    //   reserved <field_number>;
+    //   reserved "<field_name>";
+    //
+    // Example history (for documentation):
+    // - reserved 51: deprecated_field_v1 (removed in v2.0)
+    // - reserved 52: old_user_id (removed in v1.5)
+    reserved 51 to 100;
+}
+

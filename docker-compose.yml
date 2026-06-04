@@ -79,15 +79,18 @@ services:
     restart: unless-stopped
 
   # ── Redpanda Console (UI for monitoring) ───────────────────────────────────
+  # Using v2.8.1 which supports file-based protobuf deserialization + BigInt fix
   redpanda-console:
-    image: redpandadata/console:latest
+    image: redpandadata/console:v2.8.1
     container_name: wikistream-redpanda-console
     depends_on:
       redpanda-init:
         condition: service_completed_successfully
+    volumes:
+      - ./lib/core/src/main/proto:/etc/proto:ro
+      - ./config/redpanda-console.yaml:/etc/redpanda-console.yaml:ro
     environment:
-      KAFKA_BROKERS: redpanda:9092
-      SCHEMA_REGISTRY_ENABLED: "false"
+      CONFIG_FILEPATH: /etc/redpanda-console.yaml
     ports:
       - "8080:8080"
     restart: unless-stopped

@@ -11,23 +11,18 @@ import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.kafka.support.Acknowledgment
 import org.springframework.stereotype.Component
-import com.fasterxml.jackson.databind.ObjectMapper
 
 @Component
 class RedpandaBatchConsumer(
     private val statsService: StatsService,
-    private val objectMapper: ObjectMapper,
 ) {
     @KafkaListener(topics = [Topics.RAW], containerFactory = "batchKafkaListenerContainerFactory")
-    fun consume(records: List<ConsumerRecord<String, String>>, ack: Acknowledgment) {
+    fun consume(records: List<ConsumerRecord<String, WikiEvent>>, ack: Acknowledgment) {
         runBlocking {
             records
-                .mapNotNull { record ->
-                    objectMapper.readValue(record.value(), WikiEvent::class.java)
-                }
-                .map { event ->
+                .map { record ->
                     async(Dispatchers.Default) {
-                        statsService.recordForActiveUsers(event)
+                        statsService.recordForActiveUsers(record.value())
                     }
                 }
                 .awaitAll()
