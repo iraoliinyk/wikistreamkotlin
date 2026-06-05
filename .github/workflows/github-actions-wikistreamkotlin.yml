@@ -64,19 +64,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Resolve image repository from docker-compose.astra.yml
+      - name: Resolve image repository from docker-compose.yml
         id: image
         shell: bash
         run: |
           set -euo pipefail
           raw_image=$(awk '
-            /^[[:space:]]*wikistreamkotlin:[[:space:]]*$/ { in_service=1; next }
+            /^[[:space:]]*consumer:[[:space:]]*$/ { in_service=1; next }
             in_service && /^[[:space:]]*[a-zA-Z0-9_-]+:[[:space:]]*$/ { in_service=0 }
             in_service && /^[[:space:]]*image:[[:space:]]*/ { print $2; exit }
-          ' docker-compose.astra.yml)
+          ' docker-compose.yml)
 
           if [[ -z "${raw_image:-}" ]]; then
-            echo "Could not resolve image for service 'wikistreamkotlin' from docker-compose.astra.yml" >&2
+            echo "Could not resolve image for service 'consumer' from docker-compose.yml" >&2
             exit 1
           fi
 
