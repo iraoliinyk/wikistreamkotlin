@@ -1,6 +1,7 @@
 package com.redspace.wikistreamkotlin.consumer
 
 import com.redspace.wikistreamkotlin.consumer.domain.StatsSnapshot
+import com.redspace.wikistreamkotlin.consumer.exception.ConsumerErrorLogger
 import com.redspace.wikistreamkotlin.consumer.repository.SessionRepository
 import com.redspace.wikistreamkotlin.consumer.repository.StatsRepository
 import com.redspace.wikistreamkotlin.consumer.security.JwtSecurityProperties
@@ -26,7 +27,9 @@ class RedpandaBatchConsumerTest {
                 "test-instance",
             ),
         )
-    private val consumer = RedpandaBatchConsumer(statsService)
+    private val dlqPublisher = Mockito.mock(DlqPublisher::class.java)
+    private val errorLogger = ConsumerErrorLogger()
+    private val consumer = RedpandaBatchConsumer(statsService, dlqPublisher, errorLogger)
 
     @Test
     fun `acknowledges batch after processing records`() {
