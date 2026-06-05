@@ -57,26 +57,31 @@ jobs:
           APP_SECURITY_JWT_ACCESS_TOKEN_TTL_SECONDS: "3600"
         run: ./gradlew integrationTest
 
-  publishImage:
+  publishImages:
     runs-on: ubuntu-latest
     needs: [lintKotlin, unitTest, integrationTest]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service:
+          - { name: consumer, dockerfile: Dockerfile.consumer }
+          - { name: producer, dockerfile: Dockerfile.producer }
     steps:
       - uses: actions/checkout@v5
 
-      - name: Resolve image repository from docker-compose.yml
+      - name: Resolve image repository for ${{ matrix.service.name }}
         id: image
         shell: bash
         run: |
           set -euo pipefail
           raw_image=$(awk '
-            /^[[:space:]]*consumer:[[:space:]]*$/ { in_service=1; next }
+            /^[[:space:]]*${{ matrix.service.name }}:[[:space:]]*$/ { in_service=1; next }
             in_service && /^[[:space:]]*[a-zA-Z0-9_-]+:[[:space:]]*$/ { in_service=0 }
             in_service && /^[[:space:]]*image:[[:space:]]*/ { print $2; exit }
           ' docker-compose.yml)
 
           if [[ -z "${raw_image:-}" ]]; then
-            echo "Could not resolve image for service 'consumer' from docker-compose.yml" >&2
+            echo "Could not resolve image for service '${{ matrix.service.name }}' from docker-compose.yml" >&2
             exit 1
           fi
 
@@ -111,11 +116,11 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Build and push image
+      - name: Build and push ${{ matrix.service.name }} image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
+          file: ./${{ matrix.service.dockerfile }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
