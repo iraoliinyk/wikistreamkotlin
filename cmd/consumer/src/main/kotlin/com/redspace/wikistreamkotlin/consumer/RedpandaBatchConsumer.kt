@@ -23,13 +23,7 @@ class RedpandaBatchConsumer(
         runBlocking {
             records
                 .mapNotNull { record ->
-                    try {
-                        objectMapper.readValue(record.value(), WikiEvent::class.java)
-                    } catch (_: com.fasterxml.jackson.core.JsonProcessingException) {
-                        // Parsing errors are handled by KafkaErrorHandler
-                        // We skip them here to continue processing valid records
-                        null
-                    }
+                    objectMapper.readValue(record.value(), WikiEvent::class.java)
                 }
                 .map { event ->
                     async(Dispatchers.Default) {
@@ -41,4 +35,3 @@ class RedpandaBatchConsumer(
         ack.acknowledge()
     }
 }
-

@@ -8,6 +8,7 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory
 import org.springframework.kafka.core.ConsumerFactory
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory
 import org.springframework.kafka.listener.ContainerProperties
+import org.springframework.kafka.listener.DefaultErrorHandler
 
 @Configuration
 class ConsumerKafkaConfig(
@@ -37,12 +38,13 @@ class ConsumerKafkaConfig(
     @Bean
     fun batchKafkaListenerContainerFactory(
         consumerFactory: ConsumerFactory<String, String>,
+        kafkaErrorHandler: DefaultErrorHandler
     ): ConcurrentKafkaListenerContainerFactory<String, String> {
         val factory = ConcurrentKafkaListenerContainerFactory<String, String>()
         factory.setConsumerFactory(consumerFactory)
         factory.setBatchListener(true)
         factory.containerProperties.ackMode = ContainerProperties.AckMode.MANUAL
+        factory.setCommonErrorHandler(kafkaErrorHandler)
         return factory
     }
 }
-
