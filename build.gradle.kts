@@ -57,20 +57,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-val integrationTestSourceSet =
-    sourceSets.create("integrationTest") {
-        compileClasspath += sourceSets["main"].output + sourceSets["test"].output
-        runtimeClasspath += output + compileClasspath
-    }
-
-configurations.named("integrationTestImplementation") {
-    extendsFrom(configurations["testImplementation"])
-}
-
-configurations.named("integrationTestRuntimeOnly") {
-    extendsFrom(configurations["testRuntimeOnly"])
-}
-
 kotlin {
     compilerOptions {
         freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
@@ -90,6 +76,11 @@ detekt {
 tasks.withType<Test> {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED", "--sun-misc-unsafe-memory-access=allow", "-Xshare:off")
+}
+
+// Root project is an aggregator; runnable Spring Boot apps live in cmd modules.
+tasks.named("bootJar") {
+    enabled = false
 }
 
 tasks.named<Test>("test") {
@@ -114,52 +105,20 @@ tasks.register<Test>("unitTest") {
 tasks.register("ciTest") {
     group = "ci"
     description = "CI stage: runs all unit tests. No external services required."
-    dependsOn("unitTest")
+    dependsOn("unitTest", ":cmd:consumer:test")
     doLast {
         logger.lifecycle("✅ ciTest passed: all unit tests reported no failures.")
     }
 }
 
 // ---------------------------------------------------------------------------
-// integrationTest — requires Docker + running Cassandra (and Redis) containers
-//   Start services first:  docker compose up -d
-//   Run tests:             ./gradlew integrationTest
-//   Stop services:         docker compose down
+// integrationTest — wrapper task that runs integration tests from consumer module
+//   Usage: ./gradlew integrationTest
 // ---------------------------------------------------------------------------
-tasks.register<Test>("integrationTest") {
+tasks.register("integrationTest") {
     group = "ci"
-    description =
-        """
-        Runs integration tests only.
-        ⚠️  Requires Docker and running Cassandra/Redis containers.
-        Start them with: docker compose up -d
-        """.trimIndent()
-    useJUnitPlatform()
-    testClassesDirs = integrationTestSourceSet.output.classesDirs
-    classpath = integrationTestSourceSet.runtimeClasspath
-
-    // Ordering hint: if both unitTest and integrationTest are in the task graph,
-    // run unit tests first — but integrationTest does NOT depend on unitTest,
-    // so it can still be executed independently in its own CI stage.
-    shouldRunAfter("unitTest", "ciTest")
-
-    // Fail fast with a clear message when Docker is not available.
-    doFirst {
-        val dockerAvailable =
-            try {
-                val proc =
-                    ProcessBuilder("docker", "info")
-                        .redirectErrorStream(true)
-                        .start()
-                proc.waitFor() == 0
-            } catch (_: Exception) {
-                false
-            }
-        require(dockerAvailable) {
-            "integrationTest requires Docker. Please start Docker and run: docker compose up -d"
-        }
-        logger.lifecycle("🐳 Docker detected — proceeding with integration tests.")
-    }
+    description = "Wrapper task: runs integration tests from consumer module"
+    dependsOn(":cmd:consumer:integrationTest")
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+
+# ─── Build stage ──────────────────────────────────────────────────────────────
+FROM eclipse-temurin:25-jdk AS builder
+WORKDIR /workspace
+
+ENV GRADLE_USER_HOME=/home/gradle/.gradle
+
+# Copy wrapper first so dependency layer is cached separately from source
+COPY gradlew gradlew
+COPY gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.jar
+COPY gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.properties
+COPY settings.gradle.kts build.gradle.kts ./
+
+# Copy every submodule build file (keeps dependency cache valid even if sources change)
+COPY lib/core/build.gradle.kts         lib/core/build.gradle.kts
+COPY cmd/consumer/build.gradle.kts     cmd/consumer/build.gradle.kts
+COPY cmd/producer/build.gradle.kts     cmd/producer/build.gradle.kts
+
+RUN chmod +x ./gradlew
+RUN --mount=type=cache,target=/home/gradle/.gradle \
+    ./gradlew --no-daemon :cmd:consumer:dependencies
+
+# Copy source for the modules actually needed by consumer
+COPY lib/core/src     lib/core/src
+COPY cmd/consumer/src cmd/consumer/src
+
+RUN --mount=type=cache,target=/home/gradle/.gradle \
+    ./gradlew --no-daemon :cmd:consumer:bootJar -x test
+
+RUN JAR_PATH=$(find cmd/consumer/build/libs -maxdepth 1 -type f -name "*-SNAPSHOT.jar" ! -name "*-plain.jar" | head -n 1) \
+    && test -n "$JAR_PATH" \
+    && cp "$JAR_PATH" app.jar
+
+# ─── Runtime stage ────────────────────────────────────────────────────────────
+FROM eclipse-temurin:25-jre-alpine
+WORKDIR /app
+
+RUN addgroup -S spring && adduser -S -u 10001 -G spring spring
+USER spring
+
+COPY --from=builder /workspace/app.jar app.jar
+
+EXPOSE 7000
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+
