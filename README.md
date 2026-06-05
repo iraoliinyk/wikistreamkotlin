@@ -503,6 +503,54 @@ kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true    # Consumer on 7001
   - Old tokens signed with different secret will fail
   - Login again to get new token
 
+- **Clean up Redpanda topics:**
+
+You can delete and purge topics using the Redpanda Console UI or CLI:
+
+**Option 1: Using Redpanda Console UI (Easiest)**
+
+1. Open http://localhost:8080 (Redpanda Console)
+2. Navigate to **Topics** tab
+3. Select the topic you want to delete (e.g., `wiki.recentchange.raw` or `wiki.recentchange.dlq`)
+4. Click the **Delete** button on the topic details page
+5. Confirm deletion
+
+**Option 2: Using the rpk CLI (docker exec)**
+
+```bash
+# List all topics
+docker exec wikistream-redpanda rpk topic list
+
+# Delete a specific topic
+docker exec wikistream-redpanda rpk topic delete wiki.recentchange.raw
+
+# Delete multiple topics at once
+docker exec wikistream-redpanda rpk topic delete wiki.recentchange.raw wiki.recentchange.dlq
+
+# Verify deletion
+docker exec wikistream-redpanda rpk topic list
+```
+
+**Option 3: Purge topic data (keep topic, clear messages)**
+
+If you want to keep the topic but remove all messages:
+
+```bash
+# Purge all messages from a topic (data only, schema intact)
+docker exec wikistream-redpanda rpk topic delete-records wiki.recentchange.raw --before-timestamp 0
+```
+
+**After cleanup, reinitialize topics:**
+
+```bash
+# If you deleted the topics, recreate them
+docker exec wikistream-redpanda rpk topic create wiki.recentchange.raw --partitions 3 --replicas 1 || true
+docker exec wikistream-redpanda rpk topic create wiki.recentchange.dlq --partitions 1 --replicas 1 || true
+
+# Verify
+docker exec wikistream-redpanda rpk topic list
+```
+
 ### Full Stack Issues
 
 - **Containers fail to start:**

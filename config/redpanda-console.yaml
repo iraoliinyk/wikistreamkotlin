@@ -1,6 +1,4 @@
 # Redpanda Console configuration with protobuf deserialization
-# Topics have been purged of old JSON messages — only protobuf from now on.
-
 kafka:
   brokers:
     - redpanda:9092
