@@ -154,8 +154,99 @@ wikistreamkotlin/
 | Topic | Partitions | Replicas | Format | Retention | Purpose | Notes |
 |-------|-----------|----------|--------|-----------|---------|-------|
 | `wiki.recentchange.proto` | 6 | 1 | Protobuf binary | 7 days | **Canonical stream** — all Wikipedia recent-change events encoded as protobuf `WikiEvent` | Compressed with zstd; recommended for all new consumers |
-| `wiki.recentchange.raw` | 3 | 1 | Protobuf binary | 1 day | ~~Legacy JSON stream~~ **DEPRECATED** — kept for backward compatibility only | Migrate consumers to `proto` topic |
-| `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | 7 days | Dead-letter queue for unprocessable records | Failed messages with error headers for replay |
+| `wiki.recentchange.raw` | 3 | 1 | JSON | 1 day | ~~Legacy JSON stream~~ **DEPRECATED** — kept for backward compatibility only | Migrate consumers to `proto` topic |
+| `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | default (7 days) | Dead-letter queue for unprocessable records | No explicit retention/compression configured; uses Redpanda defaults. Proto deserialization not enabled in Console. |
+
+### Dead Letter Queue (DLQ) Handling
+
+When the consumer fails to process a record from `wiki.recentchange.proto`, the message is **not lost** — it is forwarded to the `wiki.recentchange.dlq` topic with full error context for debugging and replay.
+
+**Flow:**
+
+```
+wiki.recentchange.proto
+    ↓
+RedpandaBatchConsumer (batch @KafkaListener)
+    ↓
+StatsService.recordForActiveUsers(event)
+    ├─ Success → stats recorded, next record
+    └─ Exception thrown
+        ↓
+    DlqPublisher.send(record, exception)
+        ↓
+    wiki.recentchange.dlq (original bytes + error headers)
+```
+
+**Two-layer error handling:**
+
+| Layer | Trigger | Handler | Scope |
+|-------|---------|---------|-------|
+| **Application-level** | Exception in `StatsService` (business logic failure) | `RedpandaBatchConsumer.processRecord()` catches and calls `DlqPublisher.send()` | Per-record within a batch — other records in the same batch still process normally |
+| **Framework-level** | Deserialization failure or unhandled exception before batch processing | `KafkaErrorHandlerConfig` → Spring's `DefaultErrorHandler` routes to `DlqPublisher` | Entire record rejected before reaching business logic |
+
+**What gets written to DLQ:**
+
+| Component | Content |
+|-----------|---------|
+| **Key** | Original record key (Wikipedia username) |
+| **Value** | Original protobuf bytes (re-serialized via `ProtoWikiEventMapper` if already deserialized) |
+| **Header `dlq.error.message`** | Exception message (e.g., `"Cassandra write timeout"`) |
+| **Header `dlq.error.class`** | Fully-qualified exception class (e.g., `com.datastax.oss.driver.api.core.AllNodesFailedException`) |
+| **Header `dlq.source.topic`** | Source topic name (`wiki.recentchange.proto`) |
+| **Header `dlq.source.partition`** | Partition number where the record originated |
+| **Header `dlq.source.offset`** | Offset of the failed record in the source partition |
+
+**DLQ producer configuration (`DlqKafkaConfig`):**
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| Value serializer | `ByteArraySerializer` | Preserves original bytes exactly as received — no re-encoding |
+| Acks | `all` | DLQ messages must not be lost; wait for full broker acknowledgment |
+| Key serializer | `StringSerializer` | Retains original Kafka key for correlation |
+
+**Batch acknowledgment behavior:**
+
+The consumer uses **manual acknowledgment** (`AckMode.MANUAL`). A failed record does NOT block the batch:
+
+1. Batch of N records arrives
+2. Each record is processed concurrently via `async(Dispatchers.Default)`
+3. If record X fails → caught, sent to DLQ, logged as WARN
+4. All other records in the batch continue processing
+5. After all coroutines complete → `ack.acknowledge()` commits the entire batch offset
+
+This means: **a single poison message does not stall the consumer group**.
+
+**Logging:**
+
+| Outcome | Log Level | Message |
+|---------|-----------|---------|
+| Record sent to DLQ successfully | `WARN` | `"Record sent to DLQ due to processing failure"` + source context |
+| DLQ publish itself fails | `ERROR` | `"Failed to send record to DLQ"` + source context |
+| Processing failure (before DLQ send) | `ERROR` | `"Kafka processing failed — sent to DLQ"` + topic/partition/offset |
+
+**Inspecting DLQ messages:**
+
+```bash
+# List DLQ messages via rpk
+docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq --num 5
+
+# Check message headers (error context)
+docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
+  --num 1 --print-headers
+
+# Count DLQ messages (monitor for spikes)
+docker exec wikistream-redpanda rpk topic describe wiki.recentchange.dlq
+```
+
+**Replaying DLQ messages** (manual recovery):
+
+```bash
+# Consume from DLQ and re-publish to proto topic for reprocessing
+docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
+  --num 10 | rpk topic produce wiki.recentchange.proto
+```
+
+> **Note:** DLQ messages use Redpanda default retention (~7 days). Monitor DLQ depth — a spike indicates a systemic issue (e.g., Cassandra down, schema mismatch).
 
 ### Storage
 | Store | Version | Usage |
@@ -767,3 +858,5 @@ detekt config: `config/detekt/detekt.yml`
 |----------|-------------|
 | [`JWT_BEARER_SCHEME.md`](JWT_BEARER_SCHEME.md) | Token structure, signing, validation, revocation lifecycle |
 | [`ACTIVE_USER_SESSIONS.md`](ACTIVE_USER_SESSIONS.md) | Session tracking via Redis, metadata schema, configuration |
+
+

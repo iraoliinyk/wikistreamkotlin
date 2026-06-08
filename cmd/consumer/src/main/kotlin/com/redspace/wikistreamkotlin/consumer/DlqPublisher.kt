@@ -1,9 +1,11 @@
 package com.redspace.wikistreamkotlin.consumer
 
 import com.redspace.wikistreamkotlin.core.Topics
+import com.redspace.wikistreamkotlin.core.domain.WikiEvent
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import com.redspace.wikistreamkotlin.core.exception.KafkaProcessingError
+import com.redspace.wikistreamkotlin.core.mapper.ProtoWikiEventMapper
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.header.internals.RecordHeader
@@ -56,8 +58,8 @@ class DlqPublisher(
                 if (ex != null) {
                     errorLogger.log(
                         error = KafkaProcessingError(
-                            message = "Failed to send record to DLQ [topic={}, partition={}, offset={}]",
-                            cause = exception,
+                            message = "Failed to send record to DLQ",
+                            cause = ex,
                         ),
                         level = ErrorLogLevel.ERROR,
                         context = mapOf(
@@ -69,7 +71,7 @@ class DlqPublisher(
                 } else {
                     errorLogger.log(
                         error = KafkaProcessingError(
-                            message = "Failed to send record to DLQ [topic={}, partition={}, offset={}]",
+                            message = "Record sent to DLQ due to processing failure",
                             cause = exception,
                         ),
                         level = ErrorLogLevel.WARN,
@@ -86,6 +88,7 @@ class DlqPublisher(
     private fun extractRawBytes(record: ConsumerRecord<String, *>): ByteArray {
         return when (val value = record.value()) {
             is ByteArray -> value
+            is WikiEvent -> ProtoWikiEventMapper.serializeWikiEvent(value)
             else -> value?.toString()?.toByteArray() ?: ByteArray(0)
         }
     }
