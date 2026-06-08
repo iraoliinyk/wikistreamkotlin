@@ -11,6 +11,6 @@ class RedpandaPublisher(
 ) {
     fun publish(event: WikiEvent) {
         val key = event.user ?: "unknown"
-        kafkaTemplate.send(Topics.RAW, key, event)
+        kafkaTemplate.send(Topics.PROTO, key, event)
     }
 }

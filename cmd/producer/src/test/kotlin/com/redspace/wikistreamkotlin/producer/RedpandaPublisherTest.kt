@@ -16,7 +16,7 @@ class RedpandaPublisherTest {
 
         publisher.publish(event)
 
-        Mockito.verify(kafkaTemplate).send(Topics.RAW, "Alice", event)
+        Mockito.verify(kafkaTemplate).send(Topics.PROTO, "Alice", event)
     }
 
     @Test
@@ -25,16 +25,16 @@ class RedpandaPublisherTest {
 
         publisher.publish(event)
 
-        Mockito.verify(kafkaTemplate).send(Topics.RAW, "unknown", event)
+        Mockito.verify(kafkaTemplate).send(Topics.PROTO, "unknown", event)
     }
 
     @Test
-    fun `sends events to raw topic`() {
+    fun `sends events to proto topic`() {
         val event = wikiEvent(user = "Bob")
 
         publisher.publish(event)
 
-        Mockito.verify(kafkaTemplate).send(Mockito.eq(Topics.RAW), Mockito.eq("Bob"), Mockito.same(event))
+        Mockito.verify(kafkaTemplate).send(Mockito.eq(Topics.PROTO), Mockito.eq("Bob"), Mockito.same(event))
     }
 
     private fun wikiEvent(user: String?): WikiEvent =

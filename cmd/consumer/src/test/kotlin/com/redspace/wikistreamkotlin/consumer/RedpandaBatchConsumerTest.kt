@@ -77,7 +77,7 @@ class RedpandaBatchConsumerTest {
             wiki = "enwiki",
             parsedComment = "updated"
         )
-        return ConsumerRecord("wiki.recentchange.raw", 0, 0L, "key", event)
+        return ConsumerRecord("wiki.recentchange.proto", 0, 0L, "key", event)
     }
 
     private class FakeSessionRepository(

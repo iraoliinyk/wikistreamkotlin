@@ -5,6 +5,10 @@ kafka:
   protobuf:
     enabled: true
     mappings:
+      # Canonical stream — Protobuf-encoded WikiEvent (replaces raw)
+      - topicName: "wiki.recentchange.proto"
+        valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
+      # DEPRECATED — legacy JSON stream kept for backward-compatibility only
       - topicName: "wiki.recentchange.raw"
         valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
       - topicName: "wiki.recentchange.dlq"

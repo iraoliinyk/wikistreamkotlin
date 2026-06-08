@@ -22,7 +22,7 @@ class RedpandaBatchConsumer(
     private val errorLogger: ErrorLogger
 ) {
 
-    @KafkaListener(topics = [Topics.RAW], containerFactory = "batchKafkaListenerContainerFactory")
+    @KafkaListener(topics = [Topics.PROTO], containerFactory = "batchKafkaListenerContainerFactory")
     fun consume(records: List<ConsumerRecord<String, WikiEvent>>, ack: Acknowledgment) {
         runBlocking {
             records
