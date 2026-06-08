@@ -35,11 +35,13 @@ wikistreamkotlin/
 │   │           ├── ProducerIngestionRunner.kt  # @EventListener — starts SSE loop
 │   │           ├── WikiStreamClient.kt         # WebClient SSE intake → Flow<String>
 │   │           ├── WikiEventParser.kt          # JSON → WikiEvent (nullsafe)
-│   │           ├── RedpandaPublisher.kt        # KafkaTemplate → wiki.recentchange.raw
-│   │           └── config/
-│   │               ├── ProducerKafkaConfig.kt  # ProducerFactory + KafkaTemplate beans
-│   │               ├── WebClientConfig.kt
-│   │               └── WikiStreamProperties.kt
+│   │           ├── RedpandaPublisher.kt        # KafkaTemplate → wiki.recentchange.proto
+│   │           ├── config/
+│   │           │   ├── ProducerKafkaConfig.kt  # ProducerFactory + KafkaTemplate beans
+│   │           │   ├── WebClientConfig.kt
+│   │           │   └── WikiStreamProperties.kt
+│   │           └── serializer/
+│   │               └── ProtoWikiEventSerializer.kt  # WikiEvent → protobuf binary
 │   │
 │   └── consumer/                  # Standalone Spring Boot app
 │       └── src/main/kotlin/
@@ -84,19 +86,26 @@ wikistreamkotlin/
 │               │   └── ActiveUserSessionService.kt
 │               └── exception/
 │                   ├── GlobalErrorHandler.kt
-│                   └── AppErrorLogger.kt
+│                   ├── ConsumerErrorLogger.kt
+│                   └── DlqPublisher.kt
+│               └── serializer/
+│                   └── ProtoWikiEventDeserializer.kt  # protobuf binary → WikiEvent
 │
 └── lib/
     └── core/                      # Shared contracts — no Spring Boot dependency
+        ├── src/main/proto/
+        │   └── wikievent.proto           # Protobuf schema for WikiEvent message
         └── src/main/kotlin/
             └── core/
                 ├── Topics.kt                  # Topic name constants
-                ├── EventEnvelope.kt           # Generic schema-versioned wrapper
                 ├── domain/
                 │   ├── WikiEvent.kt
-                │   └── WikiEventMeta.kt
+                │   ├── WikiEventMeta.kt
+                │   └── ... (other POKOs)
+                ├── mapper/
+                │   └── ProtoWikiEventMapper.kt   # Protobuf serialization ↔ domain model
                 └── exception/
-                    └── AppError.kt            # Sealed error hierarchy
+                    └── ... (error hierarchy)
 ```
 
 ### Ownership matrix
@@ -135,11 +144,18 @@ wikistreamkotlin/
 | Kotlinx Coroutines + Reactor bridge | (Boot-managed) | Coroutine ↔ Reactor interop |
 
 ### Messaging
-| Component | Role |
-|-----------|------|
-| Redpanda (Kafka-compatible) | Message broker — decouples producer from consumer |
-| Topic `wiki.recentchange.raw` | Raw `WikiEvent` JSON (3 partitions) |
-| Topic `wiki.recentchange.dlq` | Dead-letter queue for unprocessable records (1 partition) |
+| Component | Version | Role |
+|-----------|---------|------|
+| **Redpanda** | v24.3.14 | Kafka-compatible message broker; decouples producer from consumer via pub-sub topics |
+| **Apache Kafka / Spring Kafka** | 4.0.4 | Protocol layer + client libraries for Redpanda integration |
+| **Protocol Buffers (Protobuf)** | proto3 | Binary serialization for `WikiEvent` messages; 75% smaller and 5-10x faster than JSON |
+
+### Event Streams
+| Topic | Partitions | Replicas | Format | Retention | Purpose | Notes |
+|-------|-----------|----------|--------|-----------|---------|-------|
+| `wiki.recentchange.proto` | 6 | 1 | Protobuf binary | 7 days | **Canonical stream** — all Wikipedia recent-change events encoded as protobuf `WikiEvent` | Compressed with zstd; recommended for all new consumers |
+| `wiki.recentchange.raw` | 3 | 1 | Protobuf binary | 1 day | ~~Legacy JSON stream~~ **DEPRECATED** — kept for backward compatibility only | Migrate consumers to `proto` topic |
+| `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | 7 days | Dead-letter queue for unprocessable records | Failed messages with error headers for replay |
 
 ### Storage
 | Store | Version | Usage |
@@ -183,6 +199,8 @@ wikistreamkotlin/
 | `kotlin` | 2.3.0 |
 | `spring-boot` | 4.0.5 |
 | `spring-kafka` | 4.0.4 |
+| `protobuf-java` | (BOM) |
+| `com.google.protobuf` (plugin) | 0.9.4 |
 | `kotlinx-coroutines-reactor` | (BOM) |
 | `jackson-module-kotlin` | (BOM) |
 | `jackson-databind` | (BOM) |
@@ -568,12 +586,6 @@ docker compose logs redpanda
 
 ---
 
-## Further Reading (Dev Guides)
-
-For detailed setup steps, see `readme_local_launch.md` for comprehensive troubleshooting and IDE configuration.
-
----
-
 ## API Reference
 
 ### Health
@@ -703,11 +715,11 @@ Or via root:
 
 | Suite | Tests | Scope |
 |-------|-------|-------|
-| `lib:core:test` | 1 | Domain model |
-| `cmd:producer:test` | 2 | Parser, publisher |
-| `cmd:consumer:test` | 20 | Services, security, error handling |
-| `cmd:consumer:integrationTest` | 21 | Cassandra repos, Redis sessions, AuthService |
-| **Total** | **44** | |
+| `lib:core:test` | 6 | TopicsTest (raw, proto, dlq), ProtoWikiEventMapper serialization/deserialization |
+| `cmd:producer:test` | 12 | Parser, publisher, SSE client, configuration, ingestion runner |
+| `cmd:consumer:test` | 45 | Batch consumer (proto topic), services, security, auth, error handling |
+| `cmd:consumer:integrationTest` | 28 | Cassandra repos, Redis sessions, AuthService (with real containers) |
+| **Total** | **91** | Comprehensive coverage: protobuf serialization, Redpanda topics, DLQ, JWT auth, session management |
 
 ---
 
@@ -732,12 +744,12 @@ detekt config: `config/detekt/detekt.yml`
 
 **Import:** Postman → **Import** → select `postman_collection.json`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BASE_URL` | `http://localhost:7000` | App base URL |
+| Variable | Default                   | Description |
+|----------|---------------------------|-------------|
+| `BASE_URL` | `http://localhost:7001`   | App base URL |
 | `TEST_EMAIL` | `local-test-@example.com` | Auto-replaced with timestamped email on first run |
-| `TEST_PASSWORD` | `StrongPass#123` | Used for register and login |
-| `ACCESS_TOKEN` | _(set by Login request)_ | Bearer token, extracted automatically |
+| `TEST_PASSWORD` | `StrongPass#123`          | Used for register and login |
+| `ACCESS_TOKEN` | _(set by Login request)_  | Bearer token, extracted automatically |
 
 **Request order:**
 1. Health Check
@@ -755,4 +767,3 @@ detekt config: `config/detekt/detekt.yml`
 |----------|-------------|
 | [`JWT_BEARER_SCHEME.md`](JWT_BEARER_SCHEME.md) | Token structure, signing, validation, revocation lifecycle |
 | [`ACTIVE_USER_SESSIONS.md`](ACTIVE_USER_SESSIONS.md) | Session tracking via Redis, metadata schema, configuration |
-| [`REDPANDA_IMPLEMENTATION_GUIDE.md`](REDPANDA_IMPLEMENTATION_GUIDE.md) | Full migration guide: producer/consumer split, Redpanda setup |
