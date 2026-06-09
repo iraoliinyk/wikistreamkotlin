@@ -90,8 +90,14 @@ services:
           -c min.insync.replicas=1 \
           -c message.timestamp.type=CreateTime \
           -c max.message.bytes=524288 || true
+        
+        rpk topic create wiki.recentchange.dlq \
+           --brokers redpanda:9092 \
+           --partitions 1 --replicas 1 \
+           -c cleanup.policy=delete \
+           -c retention.ms=604800000 \
+           -c compression.type=zstd || true
 
-        rpk topic create wiki.recentchange.dlq --brokers redpanda:9092 --partitions 1 --replicas 1 || true
     restart: "no"
 
   # ── Redis ──────────────────────────────────────────────────────────────────

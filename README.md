@@ -620,7 +620,7 @@ You can delete and purge topics using the Redpanda Console UI or CLI:
 
 1. Open http://localhost:8080 (Redpanda Console)
 2. Navigate to **Topics** tab
-3. Select the topic you want to delete (e.g., `wiki.recentchange.raw` or `wiki.recentchange.dlq`)
+3. Select the topic you want to delete (e.g., `wiki.recentchange.proto` or `wiki.recentchange.dlq`)
 4. Click the **Delete** button on the topic details page
 5. Confirm deletion
 
@@ -631,10 +631,10 @@ You can delete and purge topics using the Redpanda Console UI or CLI:
 docker exec wikistream-redpanda rpk topic list
 
 # Delete a specific topic
-docker exec wikistream-redpanda rpk topic delete wiki.recentchange.raw
+docker exec wikistream-redpanda rpk topic delete wiki.recentchange.proto
 
 # Delete multiple topics at once
-docker exec wikistream-redpanda rpk topic delete wiki.recentchange.raw wiki.recentchange.dlq
+docker exec wikistream-redpanda rpk topic delete wiki.recentchange.proto wiki.recentchange.dlq
 
 # Verify deletion
 docker exec wikistream-redpanda rpk topic list
@@ -646,14 +646,14 @@ If you want to keep the topic but remove all messages:
 
 ```bash
 # Purge all messages from a topic (data only, schema intact)
-docker exec wikistream-redpanda rpk topic delete-records wiki.recentchange.raw --before-timestamp 0
+docker exec wikistream-redpanda rpk topic delete-records wiki.recentchange.proto --before-timestamp 0
 ```
 
 **After cleanup, reinitialize topics:**
 
 ```bash
 # If you deleted the topics, recreate them
-docker exec wikistream-redpanda rpk topic create wiki.recentchange.raw --partitions 3 --replicas 1 || true
+docker exec wikistream-redpanda rpk topic create wiki.recentchange.proto --partitions 3 --replicas 1 || true
 docker exec wikistream-redpanda rpk topic create wiki.recentchange.dlq --partitions 1 --replicas 1 || true
 
 # Verify
