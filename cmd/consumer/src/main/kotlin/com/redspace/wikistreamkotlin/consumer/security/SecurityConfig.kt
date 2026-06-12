@@ -112,19 +112,33 @@ class SecurityConfig(
             .logout { it.disable() }
             // Routes authorization rules
             .authorizeExchange {
-                // Public GET endpoints (health + email check).
-                it.pathMatchers(HttpMethod.GET, "/v1/status").permitAll()
+                // Public GET endpoints (health + metrics for Prometheus)
+                it.pathMatchers(HttpMethod.GET, "/v1/status", "/actuator/**").permitAll()
                 // Public register/login endpoints
-                it.pathMatchers(HttpMethod.POST, "/v1/auth/register", "/v1/auth/login").permitAll()
+                it.pathMatchers(HttpMethod.POST, "/v1/auth/*").permitAll()
                 // Everything else requires valid authentication
                 it.anyExchange().authenticated()
             }
             // Enables Bearer token resource-server mode
             .oauth2ResourceServer { oauth2ResourceServerCustomizer ->
-                oauth2ResourceServerCustomizer.jwt {
-                    // Adapts non-reactive converter for WebFlux pipeline
-                    it.jwtAuthenticationConverter(ReactiveJwtAuthenticationConverterAdapter(jwtAuthConverter))
-                }
+                oauth2ResourceServerCustomizer
+                    .authenticationEntryPoint { exchange, exception ->
+                        // Allow requests to proceed if they're for public paths
+                        val path = exchange.request.path.value()
+                        if (path.startsWith("/actuator/") || path == "/actuator" ||
+                            path == "/v1/status" || path.startsWith("/v1/auth/")) {
+                            // Don't challenge - let them through to authorization layer
+                            reactor.core.publisher.Mono.empty()
+                        } else {
+                            // For protected paths, return 401
+                            exchange.response.statusCode = org.springframework.http.HttpStatus.UNAUTHORIZED
+                            exchange.response.setComplete()
+                        }
+                    }
+                    .jwt {
+                        // Adapts non-reactive converter for WebFlux pipeline
+                        it.jwtAuthenticationConverter(ReactiveJwtAuthenticationConverterAdapter(jwtAuthConverter))
+                    }
             }
             // Runs RevokedTokenWebFilter after JWT authentication,
             // so token is already parsed/validated and principal exists

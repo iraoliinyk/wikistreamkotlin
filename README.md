@@ -374,6 +374,29 @@ The root project is an aggregator for shared build/lint tasks. Runnable Spring B
 
 ## Quick Start
 
+### Port Reference
+
+All service ports for local development and Docker deployment:
+
+| Service | Local (IDE/Gradle) | Docker (Container) | Docker (Host) | Notes |
+|---------|-------------------|-------------------|---------------|-------|
+| **Consumer** | `7000` | `7000` | `7001` (default) | Configurable via `CONSUMER_PORT` or `SERVER_PORT` |
+| **Producer** | `7002` | `7002` | N/A | Metrics endpoint at `/actuator/prometheus` |
+| **Redpanda (Kafka)** | `19092` | `9092` (internal)<br>`19092` (external) | `19092` | External port for local apps |
+| **Redpanda Console** | `8080` | `8080` | `8080` | Web UI for Kafka topics |
+| **Cassandra** | `19042` | `9042` | `19042` | Dev mode only (not in full stack) |
+| **Redis** | `6379` | `6379` | `6379` | Optional in dev mode, default in full stack |
+| **Prometheus** | `9090` | `9090` | `9090` | Monitoring (when enabled) |
+| **Grafana** | `3000` | `3000` | `3000` | Dashboards (when enabled) |
+
+**Key conventions:**
+- Consumer container always listens on `7000` internally; host port defaults to `7001` but is configurable
+- Producer runs on `7002` (both local and Docker) for Prometheus scraping
+- Redpanda uses `9092` for internal Docker network, `19092` for external/host access
+- All infrastructure ports are standard (Cassandra `9042`→`19042`, Redis `6379`, etc.)
+
+---
+
 ### Option A — Local IDEs + Docker Infra (Recommended for Development)
 
 Perfect for debugging with IDE breakpoints and local hot-reload.

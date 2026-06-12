@@ -28,6 +28,10 @@ dependencies {
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 	implementation(project(":lib:core"))
 
+	// Micrometer Prometheus for metrics
+	implementation("io.micrometer:micrometer-registry-prometheus")
+	implementation("org.springframework.boot:spring-boot-starter-actuator")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")

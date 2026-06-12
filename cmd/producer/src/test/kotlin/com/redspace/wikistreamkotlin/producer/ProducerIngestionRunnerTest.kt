@@ -3,6 +3,7 @@ package com.redspace.wikistreamkotlin.producer
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
 import com.redspace.wikistreamkotlin.producer.config.WikiStreamProperties
 import com.redspace.wikistreamkotlin.producer.exception.ProducerErrorLogger
+import com.redspace.wikistreamkotlin.producer.metrics.ProducerMetricsService
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
@@ -10,6 +11,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
+import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.web.reactive.function.client.WebClient
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -22,7 +25,8 @@ class ProducerIngestionRunnerTest {
         val parser = RecordingParser(mapOf("valid" to wikiEvent(id = 1L)))
         val streamClient = SequencedWikiStreamClient(listOf(flow { emit("valid") }, emptyFlow()))
         val errorLogger = ProducerErrorLogger()
-        val runner = ProducerIngestionRunner(streamClient, parser, publisher, errorLogger)
+        val metrics =  Mockito.mock(ProducerMetricsService::class.java)
+        val runner = ProducerIngestionRunner(streamClient, parser, publisher, errorLogger, metrics)
 
         runRunnerInBackground(runner).use {
             assertTrue(publisher.awaitPublishes())
@@ -36,7 +40,8 @@ class ProducerIngestionRunnerTest {
         val parser = RecordingParser(emptyMap())
         val streamClient = SequencedWikiStreamClient(listOf(flow { emit("ignored") }, emptyFlow()))
         val errorLogger = ProducerErrorLogger()
-        val runner = ProducerIngestionRunner(streamClient, parser, publisher, errorLogger)
+        val metrics =  Mockito.mock(ProducerMetricsService::class.java)
+        val runner = ProducerIngestionRunner(streamClient, parser, publisher, errorLogger, metrics)
 
         runRunnerInBackground(runner).use {
             Thread.sleep(200)
@@ -84,8 +89,11 @@ class ProducerIngestionRunnerTest {
     private class SequencedWikiStreamClient(
         private val flows: List<Flow<String>>,
     ) : WikiStreamClient(
-            webClient = Mockito.mock(org.springframework.web.reactive.function.client.WebClient::class.java),
-            properties = WikiStreamProperties("https://example.test", "test-agent"),
+            webClient = Mockito.mock(WebClient::class.java),
+            properties = WikiStreamProperties(
+                url = "https://example.test",
+                userAgent = "test-agent"
+            ),
         ) {
         val invocationCount = AtomicInteger(0)
 
@@ -111,7 +119,7 @@ class ProducerIngestionRunnerTest {
     private class RecordingPublisher(
         expectedPublishes: Int,
     ) : RedpandaPublisher(
-            kafkaTemplate = Mockito.mock(org.springframework.kafka.core.KafkaTemplate::class.java) as org.springframework.kafka.core.KafkaTemplate<String, WikiEvent>,
+            kafkaTemplate = Mockito.mock(KafkaTemplate::class.java) as KafkaTemplate<String, WikiEvent>,
         ) {
         val published = CopyOnWriteArrayList<WikiEvent>()
         private val latch = CountDownLatch(expectedPublishes)
