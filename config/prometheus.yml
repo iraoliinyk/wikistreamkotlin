@@ -1,0 +1,79 @@
+# Prometheus Configuration for WikiStream Monitoring
+#
+# This configuration scrapes metrics from:
+# - Producer application (port 7002)
+# - Consumer application (port 7000)
+# - Prometheus itself (self-monitoring)
+# - Redpanda (optional, if metrics are exposed)
+
+global:
+  scrape_interval: 15s      # How often to scrape targets (default: 1m)
+  evaluation_interval: 15s  # How often to evaluate rules (default: 1m)
+  
+  # Attach these labels to any time series or alerts when communicating with
+  # external systems (federation, remote storage, Alertmanager)
+  external_labels:
+    cluster: 'wikistream-local'
+    environment: 'development'
+
+# Alertmanager configuration (optional - uncomment to enable)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'
+rule_files:
+# - "alerts/*.yml"
+# - "recording_rules/*.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+scrape_configs:
+  
+  # ────────────────────────────────────────────────────────────────
+  # Producer Application Metrics
+  # ────────────────────────────────────────────────────────────────
+  - job_name: 'wikistream-producer'
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: [ 'producer:7002' ]
+        labels:
+          application: 'producer'
+          service: 'wikistream'
+          component: 'data-ingestion'
+
+  # ────────────────────────────────────────────────────────────────
+  # Consumer Application Metrics
+  # ────────────────────────────────────────────────────────────────
+  - job_name: 'wikistream-consumer'
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: [ 'consumer:7000' ]
+        labels:
+          application: 'consumer'
+          service: 'wikistream'
+          component: 'data-processing'
+
+  # ────────────────────────────────────────────────────────────────
+  # Prometheus Self-Monitoring
+  # ────────────────────────────────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: [ 'localhost:9090' ]
+        labels:
+          application: 'prometheus'
+
+  # ────────────────────────────────────────────────────────────────
+  # Redpanda Metrics
+  # ────────────────────────────────────────────────────────────────
+  - job_name: 'redpanda'
+    static_configs:
+      - targets: [ 'redpanda:9644' ]
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s

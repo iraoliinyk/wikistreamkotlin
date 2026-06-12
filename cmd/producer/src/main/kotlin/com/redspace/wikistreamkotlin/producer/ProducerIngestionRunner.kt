@@ -3,6 +3,7 @@ package com.redspace.wikistreamkotlin.producer
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import com.redspace.wikistreamkotlin.core.exception.ProducerStreamError
+import com.redspace.wikistreamkotlin.producer.metrics.ProducerMetricsService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
@@ -16,7 +17,8 @@ class ProducerIngestionRunner(
     private val streamClient: WikiStreamClient,
     private val parser: WikiEventParser,
     private val publisher: RedpandaPublisher,
-    private val errorLogger: ErrorLogger
+    private val errorLogger: ErrorLogger,
+    private val producerMetricsService: ProducerMetricsService
 ) : CommandLineRunner {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -29,7 +31,11 @@ class ProducerIngestionRunner(
                     log.info("Connecting to Wikimedia SSE stream...")
                     consecutiveFailures = 0
                     streamClient.streamRawEvents().collect { raw ->
-                        parser.parseEvent(raw)?.let { event -> publisher.publish(event) }
+                        producerMetricsService.incrementEventsConsumedFromStream()
+                        parser.parseEvent(raw)?.let { event ->
+                            publisher.publish(event)
+                            producerMetricsService.incrementEventsPersistedToRedpanda()
+                        }
                     }
                     log.info("SSE stream ended gracefully")
                 } catch (ex: Exception) {
@@ -56,6 +62,7 @@ class ProducerIngestionRunner(
                             ),
                             level = ErrorLogLevel.ERROR,
                         )
+                        producerMetricsService.incrementEventsFailedToPersist()
                         throw ex
                     }
 

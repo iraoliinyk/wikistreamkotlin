@@ -2,6 +2,7 @@ package com.redspace.wikistreamkotlin.consumer
 
 import com.redspace.wikistreamkotlin.consumer.domain.StatsSnapshot
 import com.redspace.wikistreamkotlin.consumer.exception.ConsumerErrorLogger
+import com.redspace.wikistreamkotlin.consumer.metrics.ConsumerMetricsService
 import com.redspace.wikistreamkotlin.consumer.repository.SessionRepository
 import com.redspace.wikistreamkotlin.consumer.repository.StatsRepository
 import com.redspace.wikistreamkotlin.consumer.security.JwtSecurityProperties
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.springframework.kafka.support.Acknowledgment
 import java.util.Collections
+import kotlin.jvm.java
 
 class RedpandaBatchConsumerTest {
     private val sessionRepository = FakeSessionRepository(setOf("alice@example.com"))
@@ -29,8 +31,8 @@ class RedpandaBatchConsumerTest {
         )
     private val dlqPublisher = Mockito.mock(DlqPublisher::class.java)
     private val errorLogger = ConsumerErrorLogger()
-    private val consumer = RedpandaBatchConsumer(statsService, dlqPublisher, errorLogger)
-
+    private val consumerMetricsService  =  Mockito.mock(ConsumerMetricsService::class.java)
+    private val consumer = RedpandaBatchConsumer(statsService, dlqPublisher, errorLogger, consumerMetricsService)
     @Test
     fun `acknowledges batch after processing records`() {
         val ack = Mockito.mock(Acknowledgment::class.java)

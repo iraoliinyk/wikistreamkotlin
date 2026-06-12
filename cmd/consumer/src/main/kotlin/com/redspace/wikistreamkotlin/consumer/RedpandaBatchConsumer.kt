@@ -1,5 +1,6 @@
 package com.redspace.wikistreamkotlin.consumer
 
+import com.redspace.wikistreamkotlin.consumer.metrics.ConsumerMetricsService
 import com.redspace.wikistreamkotlin.consumer.service.StatsService
 import com.redspace.wikistreamkotlin.core.Topics
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
@@ -19,7 +20,8 @@ import org.springframework.stereotype.Component
 class RedpandaBatchConsumer(
     private val statsService: StatsService,
     private val dlqPublisher: DlqPublisher,
-    private val errorLogger: ErrorLogger
+    private val errorLogger: ErrorLogger,
+    private val consumerMetricsService: ConsumerMetricsService
 ) {
 
     @KafkaListener(topics = [Topics.PROTO], containerFactory = "batchKafkaListenerContainerFactory")
@@ -28,10 +30,10 @@ class RedpandaBatchConsumer(
             records
                 .map { record ->
                     async(Dispatchers.Default) {
+                        consumerMetricsService.incrementEventsConsumedFromStream()
                         processRecord(record)
                     }
-                }
-                .awaitAll()
+                }.awaitAll()
         }
         ack.acknowledge()
     }
@@ -39,6 +41,7 @@ class RedpandaBatchConsumer(
     private suspend fun processRecord(record: ConsumerRecord<String, WikiEvent>) {
         try {
             statsService.recordForActiveUsers(record.value())
+            consumerMetricsService.incrementEventsPersistedToRedpanda()
         } catch (ex: Exception) {
             errorLogger.log(
                 error = KafkaProcessingError(
@@ -53,6 +56,7 @@ class RedpandaBatchConsumer(
                 ),
             )
             dlqPublisher.send(record, ex)
+            consumerMetricsService.incrementEventsFailedToPersist()
         }
     }
 }
