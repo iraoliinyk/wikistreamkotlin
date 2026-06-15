@@ -7,6 +7,7 @@ import com.redspace.wikistreamkotlin.core.domain.WikiEvent
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import com.redspace.wikistreamkotlin.core.exception.KafkaProcessingError
+import com.redspace.wikistreamkotlin.kafka.DlqPublisher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll

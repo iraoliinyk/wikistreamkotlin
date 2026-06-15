@@ -1,4 +1,4 @@
-package com.redspace.wikistreamkotlin.consumer
+package com.redspace.wikistreamkotlin.kafka
 
 import com.redspace.wikistreamkotlin.core.Topics
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
@@ -85,6 +85,52 @@ class DlqPublisher(
             }
     }
 
+    /**
+     * Send a failed string record to the DLQ with error context headers.
+     *
+     * @param sourceName A descriptive name for the source (e.g., SSE stream)
+     * @param key The record key (optional)
+     * @param value The raw string value that failed processing
+     * @param exception The exception that caused the failure
+     */
+    fun send(sourceName: String, key: String?, value: String, exception: Exception) {
+        val nonNullKey = key ?: ""
+        val dlqRecord = ProducerRecord<String, ByteArray>(
+            Topics.DLQ,
+            null, // partition (let Kafka decide)
+            nonNullKey,
+            value.toByteArray(),
+            listOf(
+                RecordHeader("dlq.error.message", (exception.message ?: "unknown").toByteArray()),
+                RecordHeader("dlq.error.class", exception.javaClass.name.toByteArray()),
+                RecordHeader("dlq.source.topic", sourceName.toByteArray()),
+            ),
+        )
+
+        dlqKafkaTemplate.send(dlqRecord)
+            .whenComplete { _, ex ->
+                if (ex != null) {
+                    errorLogger.log(
+                        error = KafkaProcessingError(
+                            message = "Failed to send record to DLQ",
+                            cause = ex,
+                        ),
+                        level = ErrorLogLevel.ERROR,
+                        context = mapOf("source" to sourceName),
+                    )
+                } else {
+                    errorLogger.log(
+                        error = KafkaProcessingError(
+                            message = "Record sent to DLQ due to processing failure",
+                            cause = exception,
+                        ),
+                        level = ErrorLogLevel.WARN,
+                        context = mapOf("source" to sourceName),
+                    )
+                }
+            }
+    }
+
     private fun extractRawBytes(record: ConsumerRecord<String, *>): ByteArray {
         return when (val value = record.value()) {
             is ByteArray -> value
@@ -93,4 +139,3 @@ class DlqPublisher(
         }
     }
 }
-

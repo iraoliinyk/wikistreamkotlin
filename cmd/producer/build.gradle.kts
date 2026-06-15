@@ -18,6 +18,20 @@ repositories {
 	mavenCentral()
 }
 
+val integrationTestSourceSet =
+	sourceSets.create("integrationTest") {
+		compileClasspath += sourceSets["main"].output + sourceSets["test"].output
+		runtimeClasspath += output + compileClasspath
+	}
+
+configurations.named("integrationTestImplementation") {
+	extendsFrom(configurations["testImplementation"])
+}
+
+configurations.named("integrationTestRuntimeOnly") {
+	extendsFrom(configurations["testRuntimeOnly"])
+}
+
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter")
 	implementation("org.springframework.boot:spring-boot-starter-json")
@@ -27,6 +41,7 @@ dependencies {
 	implementation("org.springframework.kafka:spring-kafka")
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 	implementation(project(":lib:core"))
+	implementation(project(":lib:kafka"))
 
 	// Micrometer Prometheus for metrics
 	implementation("io.micrometer:micrometer-registry-prometheus")
@@ -34,6 +49,12 @@ dependencies {
 
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
+	testImplementation("org.springframework.boot:spring-boot-testcontainers")
+	testImplementation("org.springframework.kafka:spring-kafka-test")
+	testImplementation(platform("org.testcontainers:testcontainers-bom:2.0.4"))
+	testImplementation("org.testcontainers:testcontainers")
+	testImplementation("org.testcontainers:testcontainers-kafka")
+	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -47,3 +68,43 @@ kotlin {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// integrationTest — requires Docker daemon (Testcontainers provisions dependencies)
+//   Run tests:  ./gradlew :cmd:producer:integrationTest
+//   Testcontainers will automatically provision: Kafka (Redpanda)
+// ---------------------------------------------------------------------------
+tasks.register<Test>("integrationTest") {
+	group = "ci"
+	description =
+		"""
+		Runs integration tests only.
+		⚠️  Requires Docker daemon.
+		Testcontainers automatically provisions Kafka (Redpanda).
+		""".trimIndent()
+	useJUnitPlatform()
+	testClassesDirs = integrationTestSourceSet.output.classesDirs
+	classpath = integrationTestSourceSet.runtimeClasspath
+
+	// Ordering hint: if both unitTest and integrationTest are in the task graph,
+	// run unit tests first — but integrationTest does NOT depend on unitTest,
+	// so it can still be executed independently in its own CI stage.
+	shouldRunAfter("test")
+
+	// Fail fast with a clear message when Docker is not available.
+	doFirst {
+		val dockerAvailable =
+			try {
+				val proc =
+					ProcessBuilder("docker", "info")
+						.redirectErrorStream(true)
+						.start()
+				proc.waitFor() == 0
+			} catch (_: Exception) {
+				false
+			}
+		require(dockerAvailable) {
+			"integrationTest requires Docker daemon. Please start Docker and try again."
+		}
+		logger.lifecycle("🐳 Docker detected — proceeding with integration tests.")
+	}
+}

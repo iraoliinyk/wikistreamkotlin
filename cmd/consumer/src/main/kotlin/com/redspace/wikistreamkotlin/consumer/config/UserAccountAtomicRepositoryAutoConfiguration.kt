@@ -4,23 +4,21 @@ import com.datastax.oss.driver.api.core.CqlSession
 import com.redspace.wikistreamkotlin.consumer.repository.UserAccountAtomicRepositoryImpl
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.cassandra.autoconfigure.CassandraAutoConfiguration
 import org.springframework.context.annotation.Bean
 
 /**
- * Registers [com.redspace.wikistreamkotlin.consumer.repository.UserAccountAtomicRepositoryImpl] as a bean only when a [CqlSession] is available.
+ * Registers [com.redspace.wikistreamkotlin.consumer.repository.UserAccountAtomicRepositoryImpl] as a bean.
  *
- * Declared as an autoconfiguration (after [org.springframework.boot.cassandra.autoconfigure.CassandraAutoConfiguration]) so that the
- * [ConditionalOnBean] check on [CqlSession] is evaluated after the Cassandra session bean
- * has already been registered — something that is not guaranteed for component-scanned beans.
+ * Declared as an autoconfiguration (after [org.springframework.boot.cassandra.autoconfigure.CassandraAutoConfiguration]) 
+ * to ensure the Cassandra session bean has already been registered.
  *
- * This means:
- * - Tests that exclude Cassandra autoconfiguration (e.g. unit/smoke tests) get no bean,
- *   and the context loads without Cassandra.
- * - Integration tests and production, where [CqlSession] is present, get the bean automatically.
+ * The bean creation depends on CqlSession being available as a constructor parameter, which will
+ * fail if Cassandra is not configured, preventing the application from starting if Cassandra is required.
  */
 @AutoConfiguration(after = [CassandraAutoConfiguration::class])
-@ConditionalOnBean(CqlSession::class)
+@ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 class UserAccountAtomicRepositoryAutoConfiguration {
     @Bean
     fun userAccountAtomicRepository(cqlSession: CqlSession) = UserAccountAtomicRepositoryImpl(cqlSession)
