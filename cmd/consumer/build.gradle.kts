@@ -47,6 +47,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation(project(":lib:core"))
+    implementation(project(":lib:kafka"))
     implementation("io.github.microutils:kotlin-logging-jvm:2.0.11")
 
 

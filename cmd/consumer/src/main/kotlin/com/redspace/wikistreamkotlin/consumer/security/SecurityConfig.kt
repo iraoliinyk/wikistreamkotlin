@@ -122,7 +122,7 @@ class SecurityConfig(
             // Enables Bearer token resource-server mode
             .oauth2ResourceServer { oauth2ResourceServerCustomizer ->
                 oauth2ResourceServerCustomizer
-                    .authenticationEntryPoint { exchange, exception ->
+                    .authenticationEntryPoint { exchange, _ ->
                         // Allow requests to proceed if they're for public paths
                         val path = exchange.request.path.value()
                         if (path.startsWith("/actuator/") || path == "/actuator" ||

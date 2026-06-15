@@ -1,6 +1,6 @@
 package com.redspace.wikistreamkotlin.consumer.config
 
-import com.redspace.wikistreamkotlin.consumer.DlqPublisher
+import com.redspace.wikistreamkotlin.kafka.DlqPublisher
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import com.redspace.wikistreamkotlin.core.exception.KafkaProcessingError
