@@ -1,13 +1,9 @@
 package com.redspace.wikistreamkotlin.consumer.repository
 
 import com.redspace.wikistreamkotlin.consumer.ConsumerApplication
+import com.redspace.wikistreamkotlin.consumer.SharedIntegrationTestConfig
 import com.redspace.wikistreamkotlin.consumer.testsupport.NoOpStatsSnapshotCassandraRepositoryConfig
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -27,6 +23,7 @@ import java.util.concurrent.TimeUnit
 @SpringBootTest(
     classes = [
         ConsumerApplication::class,
+        SharedIntegrationTestConfig::class,
         RedisSessionRepositoryIntegrationTest.TestRedisConfig::class,
         NoOpStatsSnapshotCassandraRepositoryConfig::class,
     ],
@@ -34,6 +31,9 @@ import java.util.concurrent.TimeUnit
     properties = [
         "spring.main.web-application-type=none",
         "app.session.backend=redis",
+        "spring.autoconfigure.exclude=" +
+                "org.springframework.boot.cassandra.autoconfigure.CassandraAutoConfiguration," +
+                "org.springframework.boot.cassandra.autoconfigure.CassandraDataAutoConfiguration",
     ],
 )
 @Testcontainers
@@ -43,7 +43,10 @@ class RedisSessionRepositoryIntegrationTest {
         @Bean
         @Primary
         @Suppress("MaxLineLength")
-        fun testRedisConnectionFactory(): RedisConnectionFactory = LettuceConnectionFactory(redis.host, redis.getMappedPort(REDIS_PORT))
+        fun testRedisConnectionFactory(): RedisConnectionFactory {
+            redis.start()
+            return LettuceConnectionFactory(redis.host, redis.getMappedPort(REDIS_PORT))
+        }
 
         @Bean
         @Primary
@@ -56,10 +59,6 @@ class RedisSessionRepositoryIntegrationTest {
                 hashValueSerializer = StringRedisSerializer()
                 afterPropertiesSet()
             }
-
-        @Bean
-        @Primary
-        fun testObjectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule()
     }
 
     @Autowired

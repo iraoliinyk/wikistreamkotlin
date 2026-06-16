@@ -1,5 +1,7 @@
 package com.redspace.wikistreamkotlin.consumer.testsupport
 
+import com.datastax.oss.driver.api.core.CqlSession
+import com.redspace.wikistreamkotlin.consumer.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.consumer.repository.StatsSnapshotCassandraRepository
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
@@ -16,6 +18,18 @@ class NoOpStatsSnapshotCassandraRepositoryConfig {
     @Primary
     fun noOpStatsSnapshotCassandraRepository(): StatsSnapshotCassandraRepository {
         return Mockito.mock(StatsSnapshotCassandraRepository::class.java)
+    }
+
+    @Bean
+    @Primary
+    fun noOpRevokedTokenCassandraRepository(): RevokedTokenCassandraRepository {
+        return Mockito.mock(RevokedTokenCassandraRepository::class.java)
+    }
+
+    @Bean
+    @Primary
+    fun noOpCqlSession(): CqlSession {
+        return Mockito.mock(CqlSession::class.java)
     }
 }
 

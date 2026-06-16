@@ -14,6 +14,7 @@ Events are recorded only while a user is logged in. Each authenticated user sees
 - [Prerequisites](#prerequisites)
 - [Project Setup](#project-setup)
 - [Quick Start](#quick-start)
+- [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana)
 - [Configuration Reference](#configuration-reference)
 - [API Reference](#api-reference)
 - [Tests](#tests)
@@ -53,8 +54,7 @@ wikistreamkotlin/
 │               │   ├── RedisConfig.kt                   # Lettuce connection + RedisTemplate
 │               │   ├── AstraDbConfig.kt                 # CqlSession customizer for Astra
 │               │   ├── AstraDbProperties.kt
-│               │   ├── AuthProperties.kt
-│               │   └── UserAccountAtomicRepositoryAutoConfiguration.kt
+│               │   └── AuthProperties.kt
 │               ├── controller/
 │               │   ├── AuthController.kt       # /v1/auth/*
 │               │   ├── StatsController.kt      # /v1/stats, /v1/status
@@ -67,7 +67,6 @@ wikistreamkotlin/
 │               │   ├── SessionRepository.kt              # Interface
 │               │   ├── RedisSessionRepository.kt         # Redis-backed (default)
 │               │   ├── InMemorySessionRepository.kt      # In-memory fallback
-│               │   ├── UserAccountAtomicRepository.kt    # Interface (CAS insert)
 │               │   ├── UserAccountCassandraRepository.kt # Spring Data
 │               │   ├── StatsRepository.kt                # Interface
 │               │   ├── CassandraStatsRepository.kt       # Optimistic-lock retry loop
@@ -142,6 +141,14 @@ wikistreamkotlin/
 | Spring Security | (Boot-managed) | Auth filter chain |
 | Spring Security OAuth2 Resource Server + Jose | (Boot-managed) | JWT decode & validation |
 | Kotlinx Coroutines + Reactor bridge | (Boot-managed) | Coroutine ↔ Reactor interop |
+
+### Monitoring & Observability
+| Component | Version | Role |
+|-----------|---------|------|
+| **Micrometer Prometheus** | (Boot-managed) | Metrics collection and exposition for Prometheus |
+| **Spring Boot Actuator** | (Boot-managed) | Metrics endpoints (`/actuator/prometheus`, `/actuator/health`) |
+| **Prometheus** | v2.48.0 | Metrics storage and time-series database |
+| **Grafana** | v10.2.2 | Metrics visualization and dashboarding |
 
 ### Messaging
 | Component | Version | Role |
@@ -374,13 +381,17 @@ The root project is an aggregator for shared build/lint tasks. Runnable Spring B
 
 ## Quick Start
 
+This guide covers two deployment modes:
+- **Option A** — Local apps with Docker infrastructure (recommended for development)
+- **Option B** — Full Docker stack (production-like with Astra)
+
 ### Port Reference
 
 All service ports for local development and Docker deployment:
 
 | Service | Local (IDE/Gradle) | Docker (Container) | Docker (Host) | Notes |
 |---------|-------------------|-------------------|---------------|-------|
-| **Consumer** | `7000` | `7000` | `7001` (default) | Configurable via `CONSUMER_PORT` or `SERVER_PORT` |
+| **Consumer** | `7000` | `7000` | `7001` (default) | Local uses `7000`; Docker host port configurable via `CONSUMER_PORT` |
 | **Producer** | `7002` | `7002` | N/A | Metrics endpoint at `/actuator/prometheus` |
 | **Redpanda (Kafka)** | `19092` | `9092` (internal)<br>`19092` (external) | `19092` | External port for local apps |
 | **Redpanda Console** | `8080` | `8080` | `8080` | Web UI for Kafka topics |
@@ -390,8 +401,8 @@ All service ports for local development and Docker deployment:
 | **Grafana** | `3000` | `3000` | `3000` | Dashboards (when enabled) |
 
 **Key conventions:**
-- Consumer container always listens on `7000` internally; host port defaults to `7001` but is configurable
-- Producer runs on `7002` (both local and Docker) for Prometheus scraping
+- **Local development:** Consumer runs on `7000`, Producer on `7002`
+- **Docker stack:** Consumer container internal `7000`, host `7001` (configurable)
 - Redpanda uses `9092` for internal Docker network, `19092` for external/host access
 - All infrastructure ports are standard (Cassandra `9042`→`19042`, Redis `6379`, etc.)
 
@@ -399,39 +410,63 @@ All service ports for local development and Docker deployment:
 
 ### Option A — Local IDEs + Docker Infra (Recommended for Development)
 
-Perfect for debugging with IDE breakpoints and local hot-reload.
+Perfect for debugging with IDE breakpoints and local hot-reload. Apps run locally via Gradle/IDE, infrastructure runs in Docker.
 
-**1) Start infrastructure:**
+**What you'll run:**
+- **Docker containers:** Redpanda (Kafka), Cassandra, Redis (optional), Monitoring (optional)
+- **Local Gradle:** Consumer app, Producer app
+
+---
+
+**1) Start Docker infrastructure:**
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Start with local Cassandra (default, recommended)
+# Basic setup (Redpanda + Cassandra + in-memory sessions)
 docker compose -f docker-compose.dev.yml up -d
 
-# OR with Redis for session backend
+# With Redis for session backend
 docker compose -f docker-compose.dev.yml --profile redis up -d
+
+# With Monitoring (Prometheus + Grafana)
+docker compose -f docker-compose.dev.yml --profile monitoring up -d
+
+# With both Redis and Monitoring
+docker compose -f docker-compose.dev.yml --profile redis --profile monitoring up -d
 ```
 
-This starts:
-- `redpanda` on `localhost:19092` (Kafka)
+**Available profiles:**
+- **Default** (no profile): Redpanda, Cassandra, Redpanda Console
+- **`redis`**: Adds Redis for persistent session storage (default is in-memory)
+- **`monitoring`**: Adds Prometheus (`:9090`) and Grafana (`:3000`) for metrics visualization
+
+**What starts:**
+- `redpanda` on `localhost:19092` (Kafka-compatible broker)
 - `cassandra` on `localhost:19042` (local database)
-- `redpanda-console` on `localhost:8080` (Kafka UI)
-- `redis` optional via `--profile redis`
+- `redpanda-console` on `localhost:8080` (Kafka topic browser)
+- `redis` on `localhost:6379` (optional, with `--profile redis`)
+- `prometheus` on `localhost:9090` (optional, with `--profile monitoring`)
+- `grafana` on `localhost:3000` (optional, with `--profile monitoring`)
 
-> **Note:** Dev mode uses local Cassandra. For Astra (cloud), use Option B instead.
+> **Note:** Dev mode uses local Cassandra. For Astra (cloud), see Option B.
 
-**2) Run consumer from IDE (or Gradle):**
+---
+
+**2) Run Consumer app locally:**
+
+Open a new terminal and run:
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
+# With in-memory sessions (default)
 APP_JWT_ISSUER=wikistream-local \
 APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
 APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
 APP_AUTH_ENABLED=true \
 APP_SESSION_BACKEND=in-memory \
-SERVER_PORT=7001 \
+SERVER_PORT=7000 \
 SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
 CASSANDRA_CONTACT_POINTS=127.0.0.1 \
 CASSANDRA_PORT=19042 \
@@ -440,44 +475,103 @@ CASSANDRA_LOCAL_DATACENTER=datacenter1 \
 ./gradlew :cmd:consumer:bootRun
 ```
 
-**3) Run producer (separate terminal):**
+**OR with Redis sessions** (if you started with `--profile redis`):
+
+```bash
+APP_JWT_ISSUER=wikistream-local \
+APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
+APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
+APP_AUTH_ENABLED=true \
+APP_SESSION_BACKEND=redis \
+SPRING_DATA_REDIS_HOST=localhost \
+SPRING_DATA_REDIS_PORT=6379 \
+SERVER_PORT=7000 \
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
+CASSANDRA_CONTACT_POINTS=127.0.0.1 \
+CASSANDRA_PORT=19042 \
+CASSANDRA_KEYSPACE_NAME=wikistream \
+CASSANDRA_LOCAL_DATACENTER=datacenter1 \
+./gradlew :cmd:consumer:bootRun
+```
+
+Consumer will start on **http://localhost:7000**
+
+---
+
+**3) Run Producer app locally:**
+
+Open another terminal:
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
-SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 ./gradlew :cmd:producer:bootRun
+
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
+./gradlew :cmd:producer:bootRun
 ```
 
-**4) Health check:**
+Producer will start on **http://localhost:7002** with metrics at `/actuator/prometheus`
+
+---
+
+**4) Verify everything is running:**
 
 ```bash
-curl http://localhost:7001/v1/status
+# Consumer health
+curl http://localhost:7000/v1/status
+
+# Producer health
+curl http://localhost:7002/actuator/health
+
+# Producer metrics
+curl http://localhost:7002/actuator/prometheus
+
+# Consumer metrics  
+curl http://localhost:7000/actuator/prometheus
+
+# Redpanda Console (Kafka UI)
+open http://localhost:8080
 ```
 
-**5) Stop everything:**
+---
+
+**5) Access monitoring (if started with `--profile monitoring`):**
 
 ```bash
-# Easiest: use the helper script
+# Grafana dashboard
+open http://localhost:3000
+# Login: admin / admin
+
+# Prometheus UI
+open http://localhost:9090
+```
+
+---
+
+**6) Stop everything:**
+
+```bash
+# Stop Gradle apps (press Ctrl+C in each terminal)
+# OR use helper script
 bash scripts/stop-local-apps.sh
 
-# Then stop Docker infrastructure
+# Stop Docker infrastructure
 docker compose -f docker-compose.dev.yml down
 ```
 
-Or manually:
+Manual alternative:
 
 ```bash
-# Option A: Kill both apps by gradle process pattern
+# Kill apps by gradle process pattern
 pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun'
 pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun'
 
-# Option B: Kill both apps by listening port
-kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true  # Consumer on 7001
+# OR kill by port
+kill $(lsof -tiTCP:7000 -sTCP:LISTEN) 2>/dev/null || true  # Consumer
+kill $(lsof -tiTCP:7002 -sTCP:LISTEN) 2>/dev/null || true  # Producer
 
-# Then stop Docker infrastructure
+# Stop Docker infrastructure
 docker compose -f docker-compose.dev.yml down
 ```
-
-**Or simply:** Press `Ctrl+C` in each terminal where the apps are running.
 
 ---
 
@@ -551,6 +645,167 @@ bash scripts/astra-warmup-check.sh
 docker compose down
 ```
 
+---
+
+## Monitoring with Prometheus & Grafana
+
+### Overview
+
+The project includes optional monitoring with **Prometheus** (metrics collection) and **Grafana** (visualization dashboards). Both Producer and Consumer expose metrics via Spring Boot Actuator.
+
+**Metrics Endpoints:**
+- Producer: `http://localhost:7002/actuator/prometheus`
+- Consumer: `http://localhost:7001/actuator/prometheus` (or `:7000` when running locally)
+
+### Quick Start with Monitoring
+
+**Start dev infrastructure with monitoring:**
+
+```bash
+docker compose -f docker-compose.dev.yml --profile monitoring up -d
+```
+
+**Access monitoring tools:**
+- **Grafana**: `http://localhost:3000` (admin / admin)
+- **Prometheus**: `http://localhost:9090`
+
+### Pre-configured Dashboard
+
+The project includes a ready-to-use Grafana dashboard at:
+```
+config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json
+```
+
+**Dashboard includes:**
+- Events consumed from Wikipedia SSE stream (Producer)
+- Events persisted to Redpanda (Producer)
+- Events consumed from Redpanda (Consumer)
+- Processing success vs failures (Consumer)
+- Error rate percentage with thresholds
+- Total event counters
+- JVM memory usage
+
+### Loading the Dashboard
+
+#### Option 1: Auto-provisioning (Recommended)
+
+When you start Grafana with docker-compose, the dashboard loads automatically:
+
+```bash
+# Start with monitoring profile
+docker compose -f docker-compose.dev.yml --profile monitoring up -d
+
+# Open Grafana
+open http://localhost:3000
+# Login: admin / admin
+
+# Dashboard is already loaded!
+# Go to: Dashboards → WikiStream Real-Time Metrics
+```
+
+#### Option 2: Manual Import
+
+If running Grafana separately or want to import a modified version:
+
+1. **Open Grafana**: `http://localhost:3000`
+2. **Login**: admin / admin (change password on first login)
+3. **Navigate**: Click **☰** menu → **Dashboards** → **Import**
+4. **Upload JSON**:
+   - Click **Upload JSON file**
+   - Select: `config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json`
+   - Or paste JSON content directly
+5. **Configure**:
+   - Select **Prometheus** as the data source
+   - Click **Import**
+
+**Dashboard will appear immediately with live metrics!**
+
+### Viewing Metrics
+
+**Prometheus UI** (`http://localhost:9090`):
+
+```promql
+# Producer: Events from Wikipedia (per second)
+rate(wikistream_events_consumed_from_stream_total{application="producer"}[1m])
+
+# Producer: Events persisted to Redpanda (per second)
+rate(wikistream_events_persisted_to_redpanda_total{application="producer"}[1m])
+
+# Consumer: Processing success rate (per second)
+rate(wikistream_events_processed_success_total{application="consumer"}[1m])
+
+# Consumer: Error rate percentage
+100 * (
+  rate(wikistream_events_processing_failed_total{application="consumer"}[5m]) 
+  / 
+  (rate(wikistream_events_processed_success_total{application="consumer"}[5m]) 
+   + rate(wikistream_events_processing_failed_total{application="consumer"}[5m]))
+)
+```
+
+### Available Metrics
+
+**Producer Metrics:**
+| Metric | Type | Description |
+|--------|------|-------------|
+| `wikistream_events_consumed_from_stream_total` | Counter | Events consumed from Wikipedia SSE stream |
+| `wikistream_events_persisted_to_redpanda_total` | Counter | Events successfully persisted to Redpanda |
+| `wikistream_events_persist_failed_total` | Counter | Events that failed to persist |
+
+**Consumer Metrics:**
+| Metric | Type | Description |
+|--------|------|-------------|
+| `wikistream_events_consumed_from_redpanda_total` | Counter | Events consumed from Redpanda |
+| `wikistream_events_processed_success_total` | Counter | Events processed successfully |
+| `wikistream_events_processing_failed_total` | Counter | Events that failed processing |
+
+**Spring Boot Actuator Metrics (automatic):**
+- `jvm_memory_used_bytes` - JVM memory usage
+- `jvm_gc_pause_seconds` - Garbage collection metrics
+- `system_cpu_usage` - System CPU usage
+- `process_cpu_usage` - Process CPU usage
+- `http_server_requests_seconds` - HTTP request metrics
+
+### Customizing Dashboards
+
+**Export modified dashboards:**
+
+1. **Edit in Grafana UI** - make your changes
+2. **Click ⚙️ (Settings)** → **JSON Model**
+3. **Copy the JSON**
+4. **Save to file**: `config/grafana/dashboards/my-custom-dashboard.json`
+5. **Restart Grafana** - new dashboard auto-loads
+
+### Monitoring Configuration Files
+
+```
+config/
+├── prometheus.yml                    # Prometheus scrape configuration
+└── grafana/
+    ├── datasources/
+    │   └── prometheus.yml            # Prometheus datasource config
+    ├── dashboards.yml                # Dashboard provider config
+    └── dashboards/
+        └── wikistream_redpanada_graphana_dashboard.json # Pre-configured dashboard
+```
+
+### Troubleshooting
+
+**Dashboard shows "No data":**
+- Ensure Producer and Consumer are running
+- Check Prometheus targets: `http://localhost:9090/targets`
+- Verify metrics endpoints are accessible:
+  ```bash
+  curl http://localhost:7002/actuator/prometheus  # Producer
+  curl http://localhost:7001/actuator/prometheus  # Consumer
+  ```
+
+**Prometheus can't scrape local apps:**
+- If running apps locally (not in Docker), update `config/prometheus.yml`:
+  ```yaml
+  - targets: ['host.docker.internal:7002']  # Producer
+  - targets: ['host.docker.internal:7001']  # Consumer
+  ```
 ---
 
 ## Configuration Reference
@@ -797,30 +1052,63 @@ curl http://localhost:7000/v1/stats \
 
 ## Tests
 
-### Unit tests (no Docker required)
+### Quick Reference
 
 ```bash
+# Run all unit tests (no Docker required)
+./gradlew test
+
+# Run all integration tests (Docker required - Testcontainers)
+./gradlew integrationTest
+
+# Run everything (CI pipeline)
+./gradlew ciTest
+```
+
+### Unit tests (no Docker required)
+
+Unit tests mock external dependencies and run in-memory:
+
+```bash
+# Core library tests
 ./gradlew :lib:core:test
+
+# Producer tests (parser, publisher, SSE client, metrics)
 ./gradlew :cmd:producer:test
+
+# Consumer tests (batch consumer, services, security, auth)
 ./gradlew :cmd:consumer:test
 ```
 
 Or all at once via the root aggregator:
 
 ```bash
-./gradlew ciTest
+./gradlew test
 ```
 
 ### Integration tests (Docker required)
 
-Integration tests spin up real Cassandra and Redis containers via Testcontainers — no `docker compose up` needed beforehand.
+Integration tests spin up real Cassandra, Redis, and Redpanda containers via Testcontainers — no `docker compose up` needed beforehand.
 
+**Consumer Integration Tests:**
 ```bash
 ./gradlew :cmd:consumer:integrationTest
 ```
 
-Or via root:
+Tests real Cassandra repositories, Redis sessions, and AuthService with actual containers.
 
+**Producer Integration Tests:**
+```bash
+./gradlew :cmd:producer:integrationTest
+```
+
+Tests the complete producer pipeline:
+- Real Wikipedia SSE stream connection
+- Event parsing and validation
+- Redpanda topic publishing (via Testcontainers)
+- Metrics collection
+
+**Run all integration tests:**
 ```bash
 ./gradlew integrationTest
 ```
@@ -830,10 +1118,34 @@ Or via root:
 | Suite | Tests | Scope |
 |-------|-------|-------|
 | `lib:core:test` | 6 | TopicsTest (raw, proto, dlq), ProtoWikiEventMapper serialization/deserialization |
-| `cmd:producer:test` | 12 | Parser, publisher, SSE client, configuration, ingestion runner |
+| `cmd:producer:test` | 12 | Parser, publisher, SSE client, configuration, ingestion runner, metrics service |
+| `cmd:producer:integrationTest` | 1 | End-to-end producer pipeline with real Redpanda (Testcontainers) |
 | `cmd:consumer:test` | 45 | Batch consumer (proto topic), services, security, auth, error handling |
 | `cmd:consumer:integrationTest` | 28 | Cassandra repos, Redis sessions, AuthService (with real containers) |
-| **Total** | **91** | Comprehensive coverage: protobuf serialization, Redpanda topics, DLQ, JWT auth, session management |
+| **Total** | **92** | Comprehensive coverage: protobuf serialization, Redpanda topics, DLQ, JWT auth, session management, metrics |
+
+### Test Structure
+
+**Unit Tests:**
+- Fast execution (< 30 seconds total)
+- No external dependencies
+- Mocked Kafka, Cassandra, Redis
+- Focus: business logic, parsing, serialization
+
+**Integration Tests:**
+- Slower execution (Testcontainers startup overhead)
+- Real external services (Cassandra, Redis, Redpanda)
+- Focus: end-to-end flows, data persistence, message publishing
+
+### Running Tests in CI
+
+```bash
+# Full CI pipeline (unit + integration + linting)
+./gradlew ciTest lintKotlin
+
+# With stacktrace for debugging
+./gradlew ciTest --stacktrace
+```
 
 ---
 
@@ -881,5 +1193,4 @@ detekt config: `config/detekt/detekt.yml`
 |----------|-------------|
 | [`JWT_BEARER_SCHEME.md`](JWT_BEARER_SCHEME.md) | Token structure, signing, validation, revocation lifecycle |
 | [`ACTIVE_USER_SESSIONS.md`](ACTIVE_USER_SESSIONS.md) | Session tracking via Redis, metadata schema, configuration |
-
-
+| [`DOCKER_SETUP.md`](DOCKER_SETUP.md) | Docker Compose configurations, profiles, environment variables |
