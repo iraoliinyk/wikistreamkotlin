@@ -12,7 +12,6 @@ import com.redspace.wikistreamkotlin.consumer.domain.RevokedToken
 import com.redspace.wikistreamkotlin.consumer.domain.UserAccount
 import com.redspace.wikistreamkotlin.consumer.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.consumer.repository.SessionRepository
-import com.redspace.wikistreamkotlin.consumer.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.consumer.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.consumer.security.JwtTokenService
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +27,6 @@ import java.time.Instant
 @ConditionalOnProperty(name = ["app.auth.enabled"], havingValue = "true", matchIfMissing = true)
 class AuthService(
     private val userAccountRepository: UserAccountCassandraRepository,
-    private val userAccountAtomicRepository: UserAccountAtomicRepository,
     private val revokedTokenRepository: RevokedTokenCassandraRepository,
     private val passwordEncoder: PasswordEncoder,
     private val jwtTokenService: JwtTokenService,
@@ -44,6 +42,12 @@ class AuthService(
                     ?: throw AuthValidationError("Password hashing failed")
 
             val now = Instant.now()
+            
+            // Check if user already exists
+            if (userAccountRepository.existsById(email)) {
+                throw UserAlreadyExistsError("User with email '$email' already exists")
+            }
+            
             val account =
                 UserAccount(
                     email = email,
@@ -52,10 +56,7 @@ class AuthService(
                     updatedAt = now,
                     active = true,
                 )
-            val inserted = userAccountAtomicRepository.insertIfNotExists(account)
-            if (!inserted) {
-                throw UserAlreadyExistsError("User with email '$email' already exists")
-            }
+            userAccountRepository.save(account)
             RegisterResponse(email = account.email, createdAt = account.createdAt)
         }
 

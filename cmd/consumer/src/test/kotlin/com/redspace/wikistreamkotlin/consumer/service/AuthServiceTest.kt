@@ -6,7 +6,6 @@ import com.redspace.wikistreamkotlin.consumer.domain.RevokedToken
 import com.redspace.wikistreamkotlin.consumer.domain.UserAccount
 import com.redspace.wikistreamkotlin.consumer.repository.RevokedTokenCassandraRepository
 import com.redspace.wikistreamkotlin.consumer.repository.SessionRepository
-import com.redspace.wikistreamkotlin.consumer.repository.UserAccountAtomicRepository
 import com.redspace.wikistreamkotlin.consumer.repository.UserAccountCassandraRepository
 import com.redspace.wikistreamkotlin.consumer.security.JwtSecurityProperties
 import com.redspace.wikistreamkotlin.consumer.security.JwtTokenService
@@ -33,7 +32,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class AuthServiceTest {
     private val userAccountRepository = Mockito.mock(UserAccountCassandraRepository::class.java)
-    private val userAccountAtomicRepository = Mockito.mock(UserAccountAtomicRepository::class.java)
     private val revokedTokenRepository = Mockito.mock(RevokedTokenCassandraRepository::class.java)
     private val passwordEncoder = Mockito.mock(PasswordEncoder::class.java)
     private val jwtEncoder = CapturingJwtEncoder()
@@ -49,7 +47,6 @@ class AuthServiceTest {
     private val service =
         AuthService(
             userAccountRepository,
-            userAccountAtomicRepository,
             revokedTokenRepository,
             passwordEncoder,
             jwtTokenService,
@@ -58,7 +55,7 @@ class AuthServiceTest {
 
     @BeforeEach
     fun resetState() {
-        Mockito.reset(userAccountRepository, userAccountAtomicRepository, revokedTokenRepository, passwordEncoder)
+        Mockito.reset(userAccountRepository, revokedTokenRepository, passwordEncoder)
         sessionRepository.reset()
     }
 
@@ -93,9 +90,9 @@ class AuthServiceTest {
     }
 
     @Test
-    fun `register throws UserAlreadyExistsError when atomic insert returns false`() {
+    fun `register throws UserAlreadyExistsError when user already exists`() {
         Mockito.`when`(passwordEncoder.encode("password123")).thenReturn("hashed-password")
-        Mockito.`when`(userAccountAtomicRepository.insertIfNotExists(any())).thenReturn(false)
+        Mockito.`when`(userAccountRepository.existsById("alice@example.com")).thenReturn(true)
 
         val actual =
             assertThrows(UserAlreadyExistsError::class.java) {
