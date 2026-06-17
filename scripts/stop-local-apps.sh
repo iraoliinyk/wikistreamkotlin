@@ -39,5 +39,12 @@ fi
 echo ""
 echo "✓ Done! Apps stopped successfully"
 echo ""
-echo "Next: docker compose -f docker-compose.dev.yml down"
+echo "🐳 Stopping Docker infrastructure..."
+echo ""
+
+# Stop both dev (with monitoring profile) and production stacks
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
+
+echo ""
+echo "✅ All services stopped!"
 

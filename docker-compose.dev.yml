@@ -4,11 +4,11 @@
 # Supports:
 #   - Cassandra: local cassandra:5.0 (default)
 #   - Astra: DataStax Astra (cloud) — requires config/cassandra-astra-secrets.properties
-#   - Session backend: Redis or in-memory
+#   - Redis: Required for session storage
 #
 # Example usage:
-#   docker compose -f docker-compose.dev.yml up -d                 # local cassandra (default)
-#   docker compose -f docker-compose.dev.yml --profile redis up -d # with Redis
+#   docker compose -f docker-compose.dev.yml up -d                       # Full infrastructure
+#   docker compose -f docker-compose.dev.yml --profile monitoring up -d  # With Prometheus + Grafana
 #
 # ─── Switching Database Backends ────────────────────────────────────────────────
 # LOCAL CASSANDRA (default):
@@ -28,7 +28,7 @@
 #       docker compose -f docker-compose.dev.yml up -d  # Skips cassandra
 #
 # ─── Profiles ──────────────────────────────────────────────────────────────────
-# redis:       Optional Redis for session backend (off by default = in-memory)
+# monitoring:  Optional Prometheus + Grafana for metrics visualization
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -145,11 +145,10 @@ services:
     entrypoint: ["/bin/sh", "-c", "cqlsh cassandra 9042 -f /schema.cql"]
     restart: "no"
 
-  # ── Redis (optional — only when needed for session backend) ─────────────────
+  # ── Redis (required for session storage) ───────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: wikistream-redis
-    profiles: ["redis"]
     ports:
       - "6379:6379"
     healthcheck:

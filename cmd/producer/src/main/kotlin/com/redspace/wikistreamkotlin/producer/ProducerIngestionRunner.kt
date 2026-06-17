@@ -59,6 +59,7 @@ class ProducerIngestionRunner(
                     ),
                     level = ErrorLogLevel.ERROR,
                 )
+                dlqPublisher.send("wikimedia-sse-stream", null, ex.localizedMessage, ex)
                 producerMetricsService.incrementEventsFailedToPersist()
                 throw ex
             }

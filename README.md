@@ -65,8 +65,7 @@ wikistreamkotlin/
 │               │   └── RevokedToken.kt
 │               ├── repository/
 │               │   ├── SessionRepository.kt              # Interface
-│               │   ├── RedisSessionRepository.kt         # Redis-backed (default)
-│               │   ├── InMemorySessionRepository.kt      # In-memory fallback
+│               │   ├── RedisSessionRepository.kt         # Redis-backed session storage
 │               │   ├── UserAccountCassandraRepository.kt # Spring Data
 │               │   ├── StatsRepository.kt                # Interface
 │               │   ├── CassandraStatsRepository.kt       # Optimistic-lock retry loop
@@ -354,8 +353,9 @@ app.security.jwt.access-token-ttl-seconds=3600
 Edit `.env` (repository root):
 
 ```dotenv
-# Allowed values: redis | in-memory
-APP_SESSION_BACKEND=redis
+# Redis is required for session storage
+SPRING_DATA_REDIS_HOST=localhost
+SPRING_DATA_REDIS_PORT=6379
 ```
 
 ### 4. Build all modules
@@ -423,31 +423,25 @@ Perfect for debugging with IDE breakpoints and local hot-reload. Apps run locall
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Basic setup (Redpanda + Cassandra + in-memory sessions)
+# Start infrastructure (Redpanda, Cassandra, Redis)
 docker compose -f docker-compose.dev.yml up -d
-
-# With Redis for session backend
-docker compose -f docker-compose.dev.yml --profile redis up -d
 
 # With Monitoring (Prometheus + Grafana)
 docker compose -f docker-compose.dev.yml --profile monitoring up -d
-
-# With both Redis and Monitoring
-docker compose -f docker-compose.dev.yml --profile redis --profile monitoring up -d
 ```
 
 **Available profiles:**
-- **Default** (no profile): Redpanda, Cassandra, Redpanda Console
-- **`redis`**: Adds Redis for persistent session storage (default is in-memory)
 - **`monitoring`**: Adds Prometheus (`:9090`) and Grafana (`:3000`) for metrics visualization
 
-**What starts:**
+**What starts by default:**
 - `redpanda` on `localhost:19092` (Kafka-compatible broker)
 - `cassandra` on `localhost:19042` (local database)
 - `redpanda-console` on `localhost:8080` (Kafka topic browser)
-- `redis` on `localhost:6379` (optional, with `--profile redis`)
-- `prometheus` on `localhost:9090` (optional, with `--profile monitoring`)
-- `grafana` on `localhost:3000` (optional, with `--profile monitoring`)
+- `redis` on `localhost:6379` (session storage)
+
+**Optional profiles:**
+- `prometheus` on `localhost:9090` (with `--profile monitoring`)
+- `grafana` on `localhost:3000` (with `--profile monitoring`)
 
 > **Note:** Dev mode uses local Cassandra. For Astra (cloud), see Option B.
 
@@ -460,32 +454,14 @@ Open a new terminal and run:
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# With in-memory sessions (default)
+# Consumer requires Redis for session storage
 APP_JWT_ISSUER=wikistream-local \
 APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
 APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
 APP_AUTH_ENABLED=true \
-APP_SESSION_BACKEND=in-memory \
-SERVER_PORT=7000 \
-SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
-CASSANDRA_CONTACT_POINTS=127.0.0.1 \
-CASSANDRA_PORT=19042 \
-CASSANDRA_KEYSPACE_NAME=wikistream \
-CASSANDRA_LOCAL_DATACENTER=datacenter1 \
-./gradlew :cmd:consumer:bootRun
-```
-
-**OR with Redis sessions** (if you started with `--profile redis`):
-
-```bash
-APP_JWT_ISSUER=wikistream-local \
-APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
-APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
-APP_AUTH_ENABLED=true \
-APP_SESSION_BACKEND=redis \
 SPRING_DATA_REDIS_HOST=localhost \
 SPRING_DATA_REDIS_PORT=6379 \
-SERVER_PORT=7000 \
+SERVER_PORT=7001 \
 SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
 CASSANDRA_CONTACT_POINTS=127.0.0.1 \
 CASSANDRA_PORT=19042 \
@@ -494,7 +470,7 @@ CASSANDRA_LOCAL_DATACENTER=datacenter1 \
 ./gradlew :cmd:consumer:bootRun
 ```
 
-Consumer will start on **http://localhost:7000**
+Consumer will start on **http://localhost:7001**
 
 ---
 
@@ -554,8 +530,8 @@ open http://localhost:9090
 # OR use helper script
 bash scripts/stop-local-apps.sh
 
-# Stop Docker infrastructure
-docker compose -f docker-compose.dev.yml down
+# Stop Docker infrastructure (dev + monitoring + production stacks)
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
 ```
 
 Manual alternative:
@@ -569,8 +545,8 @@ pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun'
 kill $(lsof -tiTCP:7000 -sTCP:LISTEN) 2>/dev/null || true  # Consumer
 kill $(lsof -tiTCP:7002 -sTCP:LISTEN) 2>/dev/null || true  # Producer
 
-# Stop Docker infrastructure
-docker compose -f docker-compose.dev.yml down
+# Stop Docker infrastructure (dev + monitoring + production stacks)
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
 ```
 
 ---
@@ -610,9 +586,6 @@ cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
 # Default: Redis for sessions, Astra for database, consumer on 7001
 docker compose up --build -d
-
-# OR with in-memory sessions instead of Redis
-APP_SESSION_BACKEND=in-memory docker compose up --build -d
 
 # OR change consumer port
 CONSUMER_PORT=8000 docker compose up --build -d
@@ -815,7 +788,8 @@ config/
 | Variable | Default | Where | Notes |
 |----------|---------|-------|-------|
 | `APP_AUTH_ENABLED` | `true` | Both | Enable `/v1/auth/*` endpoints |
-| `APP_SESSION_BACKEND` | `redis` (full stack), `in-memory` (dev) | Both | Session storage: `redis` or `in-memory` |
+| `SPRING_DATA_REDIS_HOST` | `localhost` | Both | Redis host (set to `redis` in Docker) |
+| `SPRING_DATA_REDIS_PORT` | `6379` | Both | Redis port |
 | `CONSUMER_PORT` | `7001` | Full stack only | Host port for consumer (container always 7000) |
 | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Dev only | Redpanda broker endpoint |
 | `CASSANDRA_CONTACT_POINTS` | `127.0.0.1` | Dev only | Cassandra host |
@@ -1033,9 +1007,8 @@ curl http://localhost:7000/v1/stats \
 | `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` | Keyspace name |
 | `spring.cassandra.local-datacenter` | `datacenter1` | `CASSANDRA_LOCAL_DATACENTER` | Required for driver |
 | `spring.data.redis.host` | `localhost` | `SPRING_DATA_REDIS_HOST` | Redis host (set to `redis` in Docker) |
-| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` | Redis port |
+| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` | Redis port (required for session storage) |
 | `server.port` | `7000` | `SERVER_PORT` | HTTP server port |
-| `app.session.backend` | `redis` | `APP_SESSION_BACKEND` | Session storage: `redis` or `in-memory` |
 | `app.auth.enabled` | `true` | `APP_AUTH_ENABLED` | Enable/disable auth endpoints |
 | `app.security.jwt.issuer` | _(required)_ | `APP_JWT_ISSUER` | JWT issuer claim |
 | `app.security.jwt.secret` | _(required)_ | `APP_JWT_SECRET` | JWT signing secret (≥32 chars) |

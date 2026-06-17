@@ -3,8 +3,8 @@
 #
 # Features:
 #   - Uses DataStax Astra for cloud Cassandra (requires config/cassandra-astra-secrets.properties)
-#   - Redis enabled by default (configurable via APP_SESSION_BACKEND)
-#   - Consumer + Producer apps include by default
+#   - Redis required for session storage
+#   - Consumer + Producer apps included by default
 #   - Redpanda Console for topic monitoring
 #
 # Usage:
@@ -13,7 +13,6 @@
 #
 # Environment variables:
 #   APP_AUTH_ENABLED             default: true
-#   APP_SESSION_BACKEND          default: redis (or set to in-memory)
 #   CONSUMER_PORT                default: 7001
 #
 # ──────────────────────────────────────────────────────────────────────────────
@@ -146,7 +145,6 @@ services:
       - ./config:/app/config:ro
     environment:
       APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
-      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND:-redis}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
