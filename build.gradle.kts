@@ -100,7 +100,7 @@ tasks.register<Test>("unitTest") {
     dependsOn(
         ":cmd:consumer:test",
         ":cmd:producer:test",
-        ":lib:core:test"
+        ":lib:core:test",
     )
 
     doLast {
@@ -117,7 +117,7 @@ tasks.register("integrationTest") {
     description = "Wrapper task: runs integration tests from consumer module"
     dependsOn(
         ":cmd:consumer:integrationTest",
-        ":cmd:producer:integrationTest"
+        ":cmd:producer:integrationTest",
     )
 
     doLast {
