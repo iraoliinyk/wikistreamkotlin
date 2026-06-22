@@ -1,0 +1,91 @@
+# Monitoring Stack for Development Mode
+#
+# Use this with docker-compose.dev.yml when running Consumer/Producer apps locally via IDE.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml -f code-samples/docker-compose-monitoring.yml up -d --remove-orphans
+#
+# What this provides:
+#   - Prometheus: Scrapes metrics from apps running on host machine (via host.docker.internal)
+#   - Grafana: Visualization dashboards for metrics
+#
+# Prerequisites:
+#   - Apps running locally:
+#     - Consumer on http://localhost:7001/actuator/prometheus
+#     - Producer on http://localhost:7002/actuator/prometheus
+
+services:
+
+  # ── Prometheus (Metrics Collection) ────────────────────────────────────
+  # Configured to scrape apps running on host machine (not in Docker containers)
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: wikistream-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=7d'
+    volumes:
+      - ./config/prometheus-dev.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Grafana (Metrics Visualization) ────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: wikistream-grafana
+    environment:
+      # Security settings
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+      # Server settings
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+
+      # Plugin installation
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel
+    volumes:
+      # Datasource provisioning
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+
+      # Dashboard provisioning
+      - ./config/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+
+      # Dashboard JSON files
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+      # Persistent storage for Grafana data
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+

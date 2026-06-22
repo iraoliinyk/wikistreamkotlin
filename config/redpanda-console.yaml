@@ -1,0 +1,18 @@
+# Redpanda Console configuration with protobuf deserialization
+kafka:
+  brokers:
+    - redpanda:9092
+  protobuf:
+    enabled: true
+    mappings:
+      # Canonical stream — Protobuf-encoded WikiEvent (replaces raw)
+      - topicName: "wiki.recentchange.proto"
+        valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
+
+      - topicName: "wiki.recentchange.dlq"
+        valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
+    fileSystem:
+      enabled: true
+      refreshInterval: 5m
+      paths:
+        - "/etc/proto"

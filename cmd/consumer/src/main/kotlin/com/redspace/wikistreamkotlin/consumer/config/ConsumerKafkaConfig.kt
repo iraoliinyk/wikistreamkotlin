@@ -1,5 +1,7 @@
 package com.redspace.wikistreamkotlin.consumer.config
 
+import com.redspace.wikistreamkotlin.core.domain.WikiEvent
+import com.redspace.wikistreamkotlin.consumer.serializer.ProtoWikiEventDeserializer
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -17,7 +19,7 @@ class ConsumerKafkaConfig(
     @Value("\${spring.kafka.consumer.max-poll-records:50}") private val maxPollRecords: Int,
 ) {
     @Bean
-    fun consumerFactory(): ConsumerFactory<String, String> {
+    fun consumerFactory(): ConsumerFactory<String, WikiEvent> {
         val props = mapOf(
             ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
             ConsumerConfig.GROUP_ID_CONFIG to groupId,
@@ -25,7 +27,7 @@ class ConsumerKafkaConfig(
             ConsumerConfig.MAX_POLL_RECORDS_CONFIG to maxPollRecords,
             ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest",
             ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG to "org.apache.kafka.common.serialization.StringDeserializer",
-            ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to "org.apache.kafka.common.serialization.StringDeserializer",
+            ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to ProtoWikiEventDeserializer::class.java,
         )
         return DefaultKafkaConsumerFactory(props)
     }
@@ -37,10 +39,10 @@ class ConsumerKafkaConfig(
      */
     @Bean
     fun batchKafkaListenerContainerFactory(
-        consumerFactory: ConsumerFactory<String, String>,
+        consumerFactory: ConsumerFactory<String, WikiEvent>,
         kafkaErrorHandler: DefaultErrorHandler
-    ): ConcurrentKafkaListenerContainerFactory<String, String> {
-        val factory = ConcurrentKafkaListenerContainerFactory<String, String>()
+    ): ConcurrentKafkaListenerContainerFactory<String, WikiEvent> {
+        val factory = ConcurrentKafkaListenerContainerFactory<String, WikiEvent>()
         factory.setConsumerFactory(consumerFactory)
         factory.setBatchListener(true)
         factory.containerProperties.ackMode = ContainerProperties.AckMode.MANUAL

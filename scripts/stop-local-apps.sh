@@ -19,14 +19,32 @@ else
 fi
 
 # Also try killing by port to catch any lingering processes
+if kill $(lsof -tiTCP:7000 -sTCP:LISTEN) 2>/dev/null; then
+    echo "  ✓ Freed port 7000"
+else
+    echo "  ℹ Port 7000 was already free"
+fi
+
 if kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null; then
     echo "  ✓ Freed port 7001"
 else
     echo "  ℹ Port 7001 was already free"
 fi
+if kill $(lsof -tiTCP:7002 -sTCP:LISTEN) 2>/dev/null; then
+    echo "  ✓ Freed port 7002"
+else
+    echo "  ℹ Port 7002 was already free"
+fi
 
 echo ""
 echo "✓ Done! Apps stopped successfully"
 echo ""
-echo "Next: docker compose -f docker-compose.dev.yml down"
+echo "🐳 Stopping Docker infrastructure..."
+echo ""
+
+# Stop both dev (with monitoring profile) and production stacks
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
+
+echo ""
+echo "✅ All services stopped!"
 

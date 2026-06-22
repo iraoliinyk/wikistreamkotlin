@@ -1,20 +1,21 @@
 package com.redspace.wikistreamkotlin.consumer
 
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.redspace.wikistreamkotlin.consumer.domain.StatsSnapshot
+import com.redspace.wikistreamkotlin.consumer.exception.ConsumerErrorLogger
+import com.redspace.wikistreamkotlin.consumer.metrics.ConsumerMetricsService
 import com.redspace.wikistreamkotlin.consumer.repository.SessionRepository
 import com.redspace.wikistreamkotlin.consumer.repository.StatsRepository
 import com.redspace.wikistreamkotlin.consumer.security.JwtSecurityProperties
 import com.redspace.wikistreamkotlin.consumer.service.ActiveUserSessionService
 import com.redspace.wikistreamkotlin.consumer.service.StatsService
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
+import com.redspace.wikistreamkotlin.kafka.DlqPublisher
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.springframework.kafka.support.Acknowledgment
-import java.util.Collections
+import java.util.*
 
 class RedpandaBatchConsumerTest {
     private val sessionRepository = FakeSessionRepository(setOf("alice@example.com"))
@@ -28,36 +29,28 @@ class RedpandaBatchConsumerTest {
                 "test-instance",
             ),
         )
-    private val consumer = RedpandaBatchConsumer(statsService, jacksonObjectMapper())
+    private val dlqPublisher = Mockito.mock(DlqPublisher::class.java)
+    private val errorLogger = ConsumerErrorLogger()
+    private val consumerMetricsService = Mockito.mock(ConsumerMetricsService::class.java)
+    private val consumer = RedpandaBatchConsumer(statsService, dlqPublisher, errorLogger, consumerMetricsService)
 
     @Test
     fun `acknowledges batch after processing records`() {
         val ack = Mockito.mock(Acknowledgment::class.java)
 
-        consumer.consume(listOf(record(validPayload(1L))), ack)
+        consumer.consume(listOf(record(1L)), ack)
 
         Mockito.verify(ack).acknowledge()
     }
 
     @Test
-    fun `skips malformed JSON without failing the whole batch`() {
-        val ack = Mockito.mock(Acknowledgment::class.java)
-
-        consumer.consume(listOf(record("not-json")), ack)
-
-        assertTrue(statsRepository.recorded.isEmpty())
-        Mockito.verify(ack).acknowledge()
-    }
-
-    @Test
-    fun `calls StatsService once per valid record`() {
+    fun `calls StatsService once per record`() {
         val ack = Mockito.mock(Acknowledgment::class.java)
 
         consumer.consume(
             listOf(
-                record(validPayload(1L)),
-                record(validPayload(2L)),
-                record("not-json"),
+                record(1L),
+                record(2L),
             ),
             ack,
         )
@@ -67,31 +60,28 @@ class RedpandaBatchConsumerTest {
         Mockito.verify(ack).acknowledge()
     }
 
-    private fun record(value: String): ConsumerRecord<String, String> =
-        ConsumerRecord("wiki.recentchange.raw", 0, 0L, "key", value)
-
-    private fun validPayload(id: Long): String =
-        """
-        {
-          "schema": "mediawiki/recentchange/1.0.0",
-          "meta": null,
-          "id": $id,
-          "type": "edit",
-          "namespace": 0,
-          "title": "Main Page",
-          "title_url": "https://en.wikipedia.org/wiki/Main_Page",
-          "comment": "updated",
-          "timestamp": 1713312000,
-          "user": "TestUser",
-          "bot": false,
-          "notify_url": "https://en.wikipedia.org/w/index.php?diff=1&oldid=0",
-          "server_url": "https://en.wikipedia.org",
-          "server_name": "en.wikipedia.org",
-          "server_script_path": "/w",
-          "wiki": "enwiki",
-          "parsedcomment": "updated"
-        }
-        """.trimIndent()
+    private fun record(id: Long): ConsumerRecord<String, WikiEvent> {
+        val event = WikiEvent(
+            schema = "mediawiki/recentchange/1.0.0",
+            meta = null,
+            id = id,
+            type = "edit",
+            namespace = 0,
+            title = "Main Page",
+            titleUrl = "https://en.wikipedia.org/wiki/Main_Page",
+            comment = "updated",
+            timestamp = 1713312000,
+            user = "TestUser",
+            bot = false,
+            notifyUrl = "https://en.wikipedia.org/w/index.php?diff=1&oldid=0",
+            serverUrl = "https://en.wikipedia.org",
+            serverName = "en.wikipedia.org",
+            serverScriptPath = "/w",
+            wiki = "enwiki",
+            parsedComment = "updated"
+        )
+        return ConsumerRecord("wiki.recentchange.proto", 0, 0L, "key", event)
+    }
 
     private class FakeSessionRepository(
         private val activeEmails: Set<String>,

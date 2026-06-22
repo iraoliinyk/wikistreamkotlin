@@ -1,7 +1,6 @@
 package com.redspace.wikistreamkotlin.consumer.repository
 
 import com.redspace.wikistreamkotlin.consumer.security.JwtSecurityProperties
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.core.ScanOptions
 import org.springframework.stereotype.Repository
@@ -10,7 +9,6 @@ import java.time.Instant
 import kotlin.text.toLongOrNull
 
 @Repository
-@ConditionalOnProperty(name = ["app.session.backend"], havingValue = "redis")
 class RedisSessionRepository(
     private val redisTemplate: RedisTemplate<String, String>,
     private val jwtSecurityProperties: JwtSecurityProperties,

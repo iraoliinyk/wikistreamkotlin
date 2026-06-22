@@ -3,8 +3,8 @@
 #
 # Features:
 #   - Uses DataStax Astra for cloud Cassandra (requires config/cassandra-astra-secrets.properties)
-#   - Redis enabled by default (configurable via APP_SESSION_BACKEND)
-#   - Consumer + Producer apps include by default
+#   - Redis required for session storage
+#   - Consumer + Producer apps included by default
 #   - Redpanda Console for topic monitoring
 #
 # Usage:
@@ -13,12 +13,10 @@
 #
 # Environment variables:
 #   APP_AUTH_ENABLED             default: true
-#   APP_SESSION_BACKEND          default: redis (or set to in-memory)
 #   CONSUMER_PORT                default: 7001
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
-version: '3.8'
 
 services:
 
@@ -61,8 +59,44 @@ services:
       - /bin/sh
       - -c
       - |
-        rpk topic create wiki.recentchange.raw --brokers redpanda:9092 --partitions 3 --replicas 1 || true
-        rpk topic create wiki.recentchange.dlq --brokers redpanda:9092 --partitions 1 --replicas 1 || true
+        # DEPRECATED — JSON-based raw stream, kept for backward-compatibility only
+        rpk topic create wiki.recentchange.raw \
+          --brokers redpanda:9092 \
+          --partitions 3 --replicas 1 \
+          -c cleanup.policy=delete \
+          -c retention.ms=86400000 \
+          -c compression.type=producer || true
+
+        # Canonical Protobuf event stream — supersedes wiki.recentchange.raw
+        #
+        # partitions=6 : 2× raw, room for parallel consumers without rebalance overhead
+        # cleanup.policy=delete : time-based expiry; compaction makes no sense for immutable edits
+        # retention.ms=604800000 : 7-day window — protobuf is ~75 % smaller than JSON so the
+        #                          same storage budget now covers a full week of edits
+        # compression.type=zstd : enforced at topic level so every producer is consistent;
+        #                         zstd gives the best ratio (~4:1) with reasonable CPU cost
+        # min.insync.replicas=1 : single-node cluster; set to 2 in multi-broker production
+        # message.timestamp.type=CreateTime : preserves the actual Wikipedia edit time as
+        #                                     captured by the SSE producer, not broker-append time
+        # max.message.bytes=524288 : 512 KB hard ceiling — a protobuf WikiEvent is ~300-600 B;
+        #                            this blocks runaway payloads while still allowing headroom
+        rpk topic create wiki.recentchange.proto \
+          --brokers redpanda:9092 \
+          --partitions 6 --replicas 1 \
+          -c cleanup.policy=delete \
+          -c retention.ms=604800000 \
+          -c compression.type=zstd \
+          -c min.insync.replicas=1 \
+          -c message.timestamp.type=CreateTime \
+          -c max.message.bytes=524288 || true
+        
+        rpk topic create wiki.recentchange.dlq \
+           --brokers redpanda:9092 \
+           --partitions 1 --replicas 1 \
+           -c cleanup.policy=delete \
+           -c retention.ms=604800000 \
+           -c compression.type=zstd || true
+
     restart: "no"
 
   # ── Redis ──────────────────────────────────────────────────────────────────
@@ -79,15 +113,18 @@ services:
     restart: unless-stopped
 
   # ── Redpanda Console (UI for monitoring) ───────────────────────────────────
+  # Using v2.8.1 which supports file-based protobuf deserialization + BigInt fix
   redpanda-console:
-    image: redpandadata/console:latest
+    image: redpandadata/console:v2.8.1
     container_name: wikistream-redpanda-console
     depends_on:
       redpanda-init:
         condition: service_completed_successfully
+    volumes:
+      - ./lib/core/src/main/proto:/etc/proto:ro
+      - ./config/redpanda-console.yaml:/etc/redpanda-console.yaml:ro
     environment:
-      KAFKA_BROKERS: redpanda:9092
-      SCHEMA_REGISTRY_ENABLED: "false"
+      CONFIG_FILEPATH: /etc/redpanda-console.yaml
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -108,7 +145,6 @@ services:
       - ./config:/app/config:ro
     environment:
       APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
-      APP_SESSION_BACKEND: ${APP_SESSION_BACKEND:-redis}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
@@ -127,4 +163,6 @@ services:
         condition: service_completed_successfully
     environment:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    ports:
+      - "7002:7002"
     restart: unless-stopped

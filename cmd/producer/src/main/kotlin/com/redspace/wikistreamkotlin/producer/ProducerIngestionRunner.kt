@@ -3,12 +3,13 @@ package com.redspace.wikistreamkotlin.producer
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import com.redspace.wikistreamkotlin.core.exception.ProducerStreamError
+import com.redspace.wikistreamkotlin.kafka.DlqPublisher
+import com.redspace.wikistreamkotlin.producer.metrics.ProducerMetricsService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.springframework.boot.CommandLineRunner
 import org.springframework.stereotype.Component
-import kotlin.math.min
 import kotlin.time.Duration.Companion.milliseconds
 
 @Component
@@ -16,57 +17,53 @@ class ProducerIngestionRunner(
     private val streamClient: WikiStreamClient,
     private val parser: WikiEventParser,
     private val publisher: RedpandaPublisher,
-    private val errorLogger: ErrorLogger
+    private val dlqPublisher: DlqPublisher,
+    private val errorLogger: ErrorLogger,
+    private val producerMetricsService: ProducerMetricsService
 ) : CommandLineRunner {
     private val log = LoggerFactory.getLogger(javaClass)
 
     override fun run(vararg args: String) {
         runBlocking {
-            var consecutiveFailures = 0
-            val maxConsecutiveFailures = 5
-            while (consecutiveFailures < maxConsecutiveFailures) {
-                try {
-                    log.info("Connecting to Wikimedia SSE stream...")
-                    consecutiveFailures = 0
-                    streamClient.streamRawEvents().collect { raw ->
-                        parser.parseEvent(raw)?.let { event -> publisher.publish(event) }
-                    }
-                    log.info("SSE stream ended gracefully")
-                } catch (ex: Exception) {
-                    consecutiveFailures++
-                    val backoffMs = calculateBackoff(consecutiveFailures)
-
-                    errorLogger.log(
-                        error = ProducerStreamError(
-                            message = "SSE stream connection failed (attempt $consecutiveFailures/$maxConsecutiveFailures)",
-                            cause = ex,
-                        ),
-                        level = ErrorLogLevel.WARN,
-                        context = mapOf(
-                            "backoffMs" to backoffMs,
-                            "exceptionType" to ex::class.simpleName,
-                        ),
-                    )
-
-                    if (consecutiveFailures >= maxConsecutiveFailures) {
+            val backoffMs = 1000
+            try {
+                log.info("Connecting to Wikimedia SSE stream...")
+                streamClient.streamRawEvents().collect { raw ->
+                    producerMetricsService.incrementEventsConsumedFromStream()
+                    try {
+                        parser.parseEvent(raw)?.let { event ->
+                            publisher.publish(event)
+                            producerMetricsService.incrementEventsPersistedToRedpanda()
+                        }
+                    } catch (ex: Exception) {
                         errorLogger.log(
                             error = ProducerStreamError(
-                                message = "Max consecutive failures ($maxConsecutiveFailures) reached. Stopping ingestion.",
+                                message = "Failed to parse or publish event",
                                 cause = ex,
                             ),
                             level = ErrorLogLevel.ERROR,
+                            context = mapOf(
+                                "rawEvent" to raw.take(200) // Log snippet of raw event
+                            )
                         )
-                        throw ex
+                        dlqPublisher.send("wikimedia-sse-stream", null, raw, ex)
+                        producerMetricsService.incrementEventsFailedToPersist()
                     }
-
-                    delay(backoffMs.milliseconds)
                 }
+                log.info("SSE stream ended gracefully")
+            } catch (ex: Exception) {
+                errorLogger.log(
+                    error = ProducerStreamError(
+                        message = "SSE stream connection failed",
+                        cause = ex,
+                    ),
+                    level = ErrorLogLevel.ERROR,
+                )
+                dlqPublisher.send("wikimedia-sse-stream", null, ex.localizedMessage, ex)
+                producerMetricsService.incrementEventsFailedToPersist()
+                throw ex
             }
+            delay(backoffMs.milliseconds)
         }
-    }
-
-    private fun calculateBackoff(attemptNumber: Int): Long {
-        val backoffSeconds = min(1L shl (attemptNumber - 1), 16L)
-        return backoffSeconds * 1000
     }
 }

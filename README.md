@@ -14,6 +14,7 @@ Events are recorded only while a user is logged in. Each authenticated user sees
 - [Prerequisites](#prerequisites)
 - [Project Setup](#project-setup)
 - [Quick Start](#quick-start)
+- [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana)
 - [Configuration Reference](#configuration-reference)
 - [API Reference](#api-reference)
 - [Tests](#tests)
@@ -35,11 +36,13 @@ wikistreamkotlin/
 │   │           ├── ProducerIngestionRunner.kt  # @EventListener — starts SSE loop
 │   │           ├── WikiStreamClient.kt         # WebClient SSE intake → Flow<String>
 │   │           ├── WikiEventParser.kt          # JSON → WikiEvent (nullsafe)
-│   │           ├── RedpandaPublisher.kt        # KafkaTemplate → wiki.recentchange.raw
-│   │           └── config/
-│   │               ├── ProducerKafkaConfig.kt  # ProducerFactory + KafkaTemplate beans
-│   │               ├── WebClientConfig.kt
-│   │               └── WikiStreamProperties.kt
+│   │           ├── RedpandaPublisher.kt        # KafkaTemplate → wiki.recentchange.proto
+│   │           ├── config/
+│   │           │   ├── ProducerKafkaConfig.kt  # ProducerFactory + KafkaTemplate beans
+│   │           │   ├── WebClientConfig.kt
+│   │           │   └── WikiStreamProperties.kt
+│   │           └── serializer/
+│   │               └── ProtoWikiEventSerializer.kt  # WikiEvent → protobuf binary
 │   │
 │   └── consumer/                  # Standalone Spring Boot app
 │       └── src/main/kotlin/
@@ -51,8 +54,7 @@ wikistreamkotlin/
 │               │   ├── RedisConfig.kt                   # Lettuce connection + RedisTemplate
 │               │   ├── AstraDbConfig.kt                 # CqlSession customizer for Astra
 │               │   ├── AstraDbProperties.kt
-│               │   ├── AuthProperties.kt
-│               │   └── UserAccountAtomicRepositoryAutoConfiguration.kt
+│               │   └── AuthProperties.kt
 │               ├── controller/
 │               │   ├── AuthController.kt       # /v1/auth/*
 │               │   ├── StatsController.kt      # /v1/stats, /v1/status
@@ -63,9 +65,7 @@ wikistreamkotlin/
 │               │   └── RevokedToken.kt
 │               ├── repository/
 │               │   ├── SessionRepository.kt              # Interface
-│               │   ├── RedisSessionRepository.kt         # Redis-backed (default)
-│               │   ├── InMemorySessionRepository.kt      # In-memory fallback
-│               │   ├── UserAccountAtomicRepository.kt    # Interface (CAS insert)
+│               │   ├── RedisSessionRepository.kt         # Redis-backed session storage
 │               │   ├── UserAccountCassandraRepository.kt # Spring Data
 │               │   ├── StatsRepository.kt                # Interface
 │               │   ├── CassandraStatsRepository.kt       # Optimistic-lock retry loop
@@ -84,19 +84,26 @@ wikistreamkotlin/
 │               │   └── ActiveUserSessionService.kt
 │               └── exception/
 │                   ├── GlobalErrorHandler.kt
-│                   └── AppErrorLogger.kt
+│                   ├── ConsumerErrorLogger.kt
+│                   └── DlqPublisher.kt
+│               └── serializer/
+│                   └── ProtoWikiEventDeserializer.kt  # protobuf binary → WikiEvent
 │
 └── lib/
     └── core/                      # Shared contracts — no Spring Boot dependency
+        ├── src/main/proto/
+        │   └── wikievent.proto           # Protobuf schema for WikiEvent message
         └── src/main/kotlin/
             └── core/
                 ├── Topics.kt                  # Topic name constants
-                ├── EventEnvelope.kt           # Generic schema-versioned wrapper
                 ├── domain/
                 │   ├── WikiEvent.kt
-                │   └── WikiEventMeta.kt
+                │   ├── WikiEventMeta.kt
+                │   └── ... (other POKOs)
+                ├── mapper/
+                │   └── ProtoWikiEventMapper.kt   # Protobuf serialization ↔ domain model
                 └── exception/
-                    └── AppError.kt            # Sealed error hierarchy
+                    └── ... (error hierarchy)
 ```
 
 ### Ownership matrix
@@ -134,12 +141,118 @@ wikistreamkotlin/
 | Spring Security OAuth2 Resource Server + Jose | (Boot-managed) | JWT decode & validation |
 | Kotlinx Coroutines + Reactor bridge | (Boot-managed) | Coroutine ↔ Reactor interop |
 
+### Monitoring & Observability
+| Component | Version | Role |
+|-----------|---------|------|
+| **Micrometer Prometheus** | (Boot-managed) | Metrics collection and exposition for Prometheus |
+| **Spring Boot Actuator** | (Boot-managed) | Metrics endpoints (`/actuator/prometheus`, `/actuator/health`) |
+| **Prometheus** | v2.48.0 | Metrics storage and time-series database |
+| **Grafana** | v10.2.2 | Metrics visualization and dashboarding |
+
 ### Messaging
-| Component | Role |
-|-----------|------|
-| Redpanda (Kafka-compatible) | Message broker — decouples producer from consumer |
-| Topic `wiki.recentchange.raw` | Raw `WikiEvent` JSON (3 partitions) |
-| Topic `wiki.recentchange.dlq` | Dead-letter queue for unprocessable records (1 partition) |
+| Component | Version | Role |
+|-----------|---------|------|
+| **Redpanda** | v24.3.14 | Kafka-compatible message broker; decouples producer from consumer via pub-sub topics |
+| **Apache Kafka / Spring Kafka** | 4.0.4 | Protocol layer + client libraries for Redpanda integration |
+| **Protocol Buffers (Protobuf)** | proto3 | Binary serialization for `WikiEvent` messages; 75% smaller and 5-10x faster than JSON |
+
+### Event Streams
+| Topic | Partitions | Replicas | Format | Retention | Purpose | Notes |
+|-------|-----------|----------|--------|-----------|---------|-------|
+| `wiki.recentchange.proto` | 6 | 1 | Protobuf binary | 7 days | **Canonical stream** — all Wikipedia recent-change events encoded as protobuf `WikiEvent` | Compressed with zstd; recommended for all new consumers |
+| `wiki.recentchange.raw` | 3 | 1 | JSON | 1 day | ~~Legacy JSON stream~~ **DEPRECATED** — kept for backward compatibility only | Migrate consumers to `proto` topic |
+| `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | default (7 days) | Dead-letter queue for unprocessable records | No explicit retention/compression configured; uses Redpanda defaults. Proto deserialization not enabled in Console. |
+
+### Dead Letter Queue (DLQ) Handling
+
+When the consumer fails to process a record from `wiki.recentchange.proto`, the message is **not lost** — it is forwarded to the `wiki.recentchange.dlq` topic with full error context for debugging and replay.
+
+**Flow:**
+
+```
+wiki.recentchange.proto
+    ↓
+RedpandaBatchConsumer (batch @KafkaListener)
+    ↓
+StatsService.recordForActiveUsers(event)
+    ├─ Success → stats recorded, next record
+    └─ Exception thrown
+        ↓
+    DlqPublisher.send(record, exception)
+        ↓
+    wiki.recentchange.dlq (original bytes + error headers)
+```
+
+**Two-layer error handling:**
+
+| Layer | Trigger | Handler | Scope |
+|-------|---------|---------|-------|
+| **Application-level** | Exception in `StatsService` (business logic failure) | `RedpandaBatchConsumer.processRecord()` catches and calls `DlqPublisher.send()` | Per-record within a batch — other records in the same batch still process normally |
+| **Framework-level** | Deserialization failure or unhandled exception before batch processing | `KafkaErrorHandlerConfig` → Spring's `DefaultErrorHandler` routes to `DlqPublisher` | Entire record rejected before reaching business logic |
+
+**What gets written to DLQ:**
+
+| Component | Content |
+|-----------|---------|
+| **Key** | Original record key (Wikipedia username) |
+| **Value** | Original protobuf bytes (re-serialized via `ProtoWikiEventMapper` if already deserialized) |
+| **Header `dlq.error.message`** | Exception message (e.g., `"Cassandra write timeout"`) |
+| **Header `dlq.error.class`** | Fully-qualified exception class (e.g., `com.datastax.oss.driver.api.core.AllNodesFailedException`) |
+| **Header `dlq.source.topic`** | Source topic name (`wiki.recentchange.proto`) |
+| **Header `dlq.source.partition`** | Partition number where the record originated |
+| **Header `dlq.source.offset`** | Offset of the failed record in the source partition |
+
+**DLQ producer configuration (`DlqKafkaConfig`):**
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| Value serializer | `ByteArraySerializer` | Preserves original bytes exactly as received — no re-encoding |
+| Acks | `all` | DLQ messages must not be lost; wait for full broker acknowledgment |
+| Key serializer | `StringSerializer` | Retains original Kafka key for correlation |
+
+**Batch acknowledgment behavior:**
+
+The consumer uses **manual acknowledgment** (`AckMode.MANUAL`). A failed record does NOT block the batch:
+
+1. Batch of N records arrives
+2. Each record is processed concurrently via `async(Dispatchers.Default)`
+3. If record X fails → caught, sent to DLQ, logged as WARN
+4. All other records in the batch continue processing
+5. After all coroutines complete → `ack.acknowledge()` commits the entire batch offset
+
+This means: **a single poison message does not stall the consumer group**.
+
+**Logging:**
+
+| Outcome | Log Level | Message |
+|---------|-----------|---------|
+| Record sent to DLQ successfully | `WARN` | `"Record sent to DLQ due to processing failure"` + source context |
+| DLQ publish itself fails | `ERROR` | `"Failed to send record to DLQ"` + source context |
+| Processing failure (before DLQ send) | `ERROR` | `"Kafka processing failed — sent to DLQ"` + topic/partition/offset |
+
+**Inspecting DLQ messages:**
+
+```bash
+# List DLQ messages via rpk
+docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq --num 5
+
+# Check message headers (error context)
+docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
+  --num 1 --print-headers
+
+# Count DLQ messages (monitor for spikes)
+docker exec wikistream-redpanda rpk topic describe wiki.recentchange.dlq
+```
+
+**Replaying DLQ messages** (manual recovery):
+
+```bash
+# Consume from DLQ and re-publish to proto topic for reprocessing
+docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
+  --num 10 | rpk topic produce wiki.recentchange.proto
+```
+
+> **Note:** DLQ messages use Redpanda default retention (~7 days). Monitor DLQ depth — a spike indicates a systemic issue (e.g., Cassandra down, schema mismatch).
 
 ### Storage
 | Store | Version | Usage |
@@ -183,6 +296,8 @@ wikistreamkotlin/
 | `kotlin` | 2.3.0 |
 | `spring-boot` | 4.0.5 |
 | `spring-kafka` | 4.0.4 |
+| `protobuf-java` | (BOM) |
+| `com.google.protobuf` (plugin) | 0.9.4 |
 | `kotlinx-coroutines-reactor` | (BOM) |
 | `jackson-module-kotlin` | (BOM) |
 | `jackson-databind` | (BOM) |
@@ -238,8 +353,9 @@ app.security.jwt.access-token-ttl-seconds=3600
 Edit `.env` (repository root):
 
 ```dotenv
-# Allowed values: redis | in-memory
-APP_SESSION_BACKEND=redis
+# Redis is required for session storage
+SPRING_DATA_REDIS_HOST=localhost
+SPRING_DATA_REDIS_PORT=6379
 ```
 
 ### 4. Build all modules
@@ -265,40 +381,86 @@ The root project is an aggregator for shared build/lint tasks. Runnable Spring B
 
 ## Quick Start
 
+This guide covers two deployment modes:
+- **Option A** — Local apps with Docker infrastructure (recommended for development)
+- **Option B** — Full Docker stack (production-like with Astra)
+
+### Port Reference
+
+All service ports for local development and Docker deployment:
+
+| Service | Local (IDE/Gradle) | Docker (Container) | Docker (Host) | Notes |
+|---------|-------------------|-------------------|---------------|-------|
+| **Consumer** | `7000` | `7000` | `7001` (default) | Local uses `7000`; Docker host port configurable via `CONSUMER_PORT` |
+| **Producer** | `7002` | `7002` | N/A | Metrics endpoint at `/actuator/prometheus` |
+| **Redpanda (Kafka)** | `19092` | `9092` (internal)<br>`19092` (external) | `19092` | External port for local apps |
+| **Redpanda Console** | `8080` | `8080` | `8080` | Web UI for Kafka topics |
+| **Cassandra** | `19042` | `9042` | `19042` | Dev mode only (not in full stack) |
+| **Redis** | `6379` | `6379` | `6379` | Optional in dev mode, default in full stack |
+| **Prometheus** | `9090` | `9090` | `9090` | Monitoring (when enabled) |
+| **Grafana** | `3000` | `3000` | `3000` | Dashboards (when enabled) |
+
+**Key conventions:**
+- **Local development:** Consumer runs on `7000`, Producer on `7002`
+- **Docker stack:** Consumer container internal `7000`, host `7001` (configurable)
+- Redpanda uses `9092` for internal Docker network, `19092` for external/host access
+- All infrastructure ports are standard (Cassandra `9042`→`19042`, Redis `6379`, etc.)
+
+---
+
 ### Option A — Local IDEs + Docker Infra (Recommended for Development)
 
-Perfect for debugging with IDE breakpoints and local hot-reload.
+Perfect for debugging with IDE breakpoints and local hot-reload. Apps run locally via Gradle/IDE, infrastructure runs in Docker.
 
-**1) Start infrastructure:**
+**What you'll run:**
+- **Docker containers:** Redpanda (Kafka), Cassandra, Redis (optional), Monitoring (optional)
+- **Local Gradle:** Consumer app, Producer app
+
+---
+
+**1) Start Docker infrastructure:**
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Start with local Cassandra (default, recommended)
+# Start infrastructure (Redpanda, Cassandra, Redis)
 docker compose -f docker-compose.dev.yml up -d
 
-# OR with Redis for session backend
-docker compose -f docker-compose.dev.yml --profile redis up -d
+# With Monitoring (Prometheus + Grafana)
+docker compose -f docker-compose.dev.yml --profile monitoring up -d
 ```
 
-This starts:
-- `redpanda` on `localhost:19092` (Kafka)
+**Available profiles:**
+- **`monitoring`**: Adds Prometheus (`:9090`) and Grafana (`:3000`) for metrics visualization
+
+**What starts by default:**
+- `redpanda` on `localhost:19092` (Kafka-compatible broker)
 - `cassandra` on `localhost:19042` (local database)
-- `redpanda-console` on `localhost:8080` (Kafka UI)
-- `redis` optional via `--profile redis`
+- `redpanda-console` on `localhost:8080` (Kafka topic browser)
+- `redis` on `localhost:6379` (session storage)
 
-> **Note:** Dev mode uses local Cassandra. For Astra (cloud), use Option B instead.
+**Optional profiles:**
+- `prometheus` on `localhost:9090` (with `--profile monitoring`)
+- `grafana` on `localhost:3000` (with `--profile monitoring`)
 
-**2) Run consumer from IDE (or Gradle):**
+> **Note:** Dev mode uses local Cassandra. For Astra (cloud), see Option B.
+
+---
+
+**2) Run Consumer app locally:**
+
+Open a new terminal and run:
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
+# Consumer requires Redis for session storage
 APP_JWT_ISSUER=wikistream-local \
 APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
 APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
 APP_AUTH_ENABLED=true \
-APP_SESSION_BACKEND=in-memory \
+SPRING_DATA_REDIS_HOST=localhost \
+SPRING_DATA_REDIS_PORT=6379 \
 SERVER_PORT=7001 \
 SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
 CASSANDRA_CONTACT_POINTS=127.0.0.1 \
@@ -308,44 +470,84 @@ CASSANDRA_LOCAL_DATACENTER=datacenter1 \
 ./gradlew :cmd:consumer:bootRun
 ```
 
-**3) Run producer (separate terminal):**
+Consumer will start on **http://localhost:7001**
+
+---
+
+**3) Run Producer app locally:**
+
+Open another terminal:
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
-SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 ./gradlew :cmd:producer:bootRun
+
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
+./gradlew :cmd:producer:bootRun
 ```
 
-**4) Health check:**
+Producer will start on **http://localhost:7002** with metrics at `/actuator/prometheus`
+
+---
+
+**4) Verify everything is running:**
 
 ```bash
-curl http://localhost:7001/v1/status
+# Consumer health
+curl http://localhost:7000/v1/status
+
+# Producer health
+curl http://localhost:7002/actuator/health
+
+# Producer metrics
+curl http://localhost:7002/actuator/prometheus
+
+# Consumer metrics  
+curl http://localhost:7000/actuator/prometheus
+
+# Redpanda Console (Kafka UI)
+open http://localhost:8080
 ```
 
-**5) Stop everything:**
+---
+
+**5) Access monitoring (if started with `--profile monitoring`):**
 
 ```bash
-# Easiest: use the helper script
+# Grafana dashboard
+open http://localhost:3000
+# Login: admin / admin
+
+# Prometheus UI
+open http://localhost:9090
+```
+
+---
+
+**6) Stop everything:**
+
+```bash
+# Stop Gradle apps (press Ctrl+C in each terminal)
+# OR use helper script
 bash scripts/stop-local-apps.sh
 
-# Then stop Docker infrastructure
-docker compose -f docker-compose.dev.yml down
+# Stop Docker infrastructure (dev + monitoring + production stacks)
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
 ```
 
-Or manually:
+Manual alternative:
 
 ```bash
-# Option A: Kill both apps by gradle process pattern
+# Kill apps by gradle process pattern
 pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun'
 pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun'
 
-# Option B: Kill both apps by listening port
-kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true  # Consumer on 7001
+# OR kill by port
+kill $(lsof -tiTCP:7000 -sTCP:LISTEN) 2>/dev/null || true  # Consumer
+kill $(lsof -tiTCP:7002 -sTCP:LISTEN) 2>/dev/null || true  # Producer
 
-# Then stop Docker infrastructure
-docker compose -f docker-compose.dev.yml down
+# Stop Docker infrastructure (dev + monitoring + production stacks)
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
 ```
-
-**Or simply:** Press `Ctrl+C` in each terminal where the apps are running.
 
 ---
 
@@ -385,9 +587,6 @@ cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 # Default: Redis for sessions, Astra for database, consumer on 7001
 docker compose up --build -d
 
-# OR with in-memory sessions instead of Redis
-APP_SESSION_BACKEND=in-memory docker compose up --build -d
-
 # OR change consumer port
 CONSUMER_PORT=8000 docker compose up --build -d
 ```
@@ -421,6 +620,167 @@ docker compose down
 
 ---
 
+## Monitoring with Prometheus & Grafana
+
+### Overview
+
+The project includes optional monitoring with **Prometheus** (metrics collection) and **Grafana** (visualization dashboards). Both Producer and Consumer expose metrics via Spring Boot Actuator.
+
+**Metrics Endpoints:**
+- Producer: `http://localhost:7002/actuator/prometheus`
+- Consumer: `http://localhost:7001/actuator/prometheus` (or `:7000` when running locally)
+
+### Quick Start with Monitoring
+
+**Start dev infrastructure with monitoring:**
+
+```bash
+docker compose -f docker-compose.dev.yml --profile monitoring up -d
+```
+
+**Access monitoring tools:**
+- **Grafana**: `http://localhost:3000` (admin / admin)
+- **Prometheus**: `http://localhost:9090`
+
+### Pre-configured Dashboard
+
+The project includes a ready-to-use Grafana dashboard at:
+```
+config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json
+```
+
+**Dashboard includes:**
+- Events consumed from Wikipedia SSE stream (Producer)
+- Events persisted to Redpanda (Producer)
+- Events consumed from Redpanda (Consumer)
+- Processing success vs failures (Consumer)
+- Error rate percentage with thresholds
+- Total event counters
+- JVM memory usage
+
+### Loading the Dashboard
+
+#### Option 1: Auto-provisioning (Recommended)
+
+When you start Grafana with docker-compose, the dashboard loads automatically:
+
+```bash
+# Start with monitoring profile
+docker compose -f docker-compose.dev.yml --profile monitoring up -d
+
+# Open Grafana
+open http://localhost:3000
+# Login: admin / admin
+
+# Dashboard is already loaded!
+# Go to: Dashboards → WikiStream Real-Time Metrics
+```
+
+#### Option 2: Manual Import
+
+If running Grafana separately or want to import a modified version:
+
+1. **Open Grafana**: `http://localhost:3000`
+2. **Login**: admin / admin (change password on first login)
+3. **Navigate**: Click **☰** menu → **Dashboards** → **Import**
+4. **Upload JSON**:
+   - Click **Upload JSON file**
+   - Select: `config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json`
+   - Or paste JSON content directly
+5. **Configure**:
+   - Select **Prometheus** as the data source
+   - Click **Import**
+
+**Dashboard will appear immediately with live metrics!**
+
+### Viewing Metrics
+
+**Prometheus UI** (`http://localhost:9090`):
+
+```promql
+# Producer: Events from Wikipedia (per second)
+rate(wikistream_events_consumed_from_stream_total{application="producer"}[1m])
+
+# Producer: Events persisted to Redpanda (per second)
+rate(wikistream_events_persisted_to_redpanda_total{application="producer"}[1m])
+
+# Consumer: Processing success rate (per second)
+rate(wikistream_events_processed_success_total{application="consumer"}[1m])
+
+# Consumer: Error rate percentage
+100 * (
+  rate(wikistream_events_processing_failed_total{application="consumer"}[5m]) 
+  / 
+  (rate(wikistream_events_processed_success_total{application="consumer"}[5m]) 
+   + rate(wikistream_events_processing_failed_total{application="consumer"}[5m]))
+)
+```
+
+### Available Metrics
+
+**Producer Metrics:**
+| Metric | Type | Description |
+|--------|------|-------------|
+| `wikistream_events_consumed_from_stream_total` | Counter | Events consumed from Wikipedia SSE stream |
+| `wikistream_events_persisted_to_redpanda_total` | Counter | Events successfully persisted to Redpanda |
+| `wikistream_events_persist_failed_total` | Counter | Events that failed to persist |
+
+**Consumer Metrics:**
+| Metric | Type | Description |
+|--------|------|-------------|
+| `wikistream_events_consumed_from_redpanda_total` | Counter | Events consumed from Redpanda |
+| `wikistream_events_processed_success_total` | Counter | Events processed successfully |
+| `wikistream_events_processing_failed_total` | Counter | Events that failed processing |
+
+**Spring Boot Actuator Metrics (automatic):**
+- `jvm_memory_used_bytes` - JVM memory usage
+- `jvm_gc_pause_seconds` - Garbage collection metrics
+- `system_cpu_usage` - System CPU usage
+- `process_cpu_usage` - Process CPU usage
+- `http_server_requests_seconds` - HTTP request metrics
+
+### Customizing Dashboards
+
+**Export modified dashboards:**
+
+1. **Edit in Grafana UI** - make your changes
+2. **Click ⚙️ (Settings)** → **JSON Model**
+3. **Copy the JSON**
+4. **Save to file**: `config/grafana/dashboards/my-custom-dashboard.json`
+5. **Restart Grafana** - new dashboard auto-loads
+
+### Monitoring Configuration Files
+
+```
+config/
+├── prometheus.yml                    # Prometheus scrape configuration
+└── grafana/
+    ├── datasources/
+    │   └── prometheus.yml            # Prometheus datasource config
+    ├── dashboards.yml                # Dashboard provider config
+    └── dashboards/
+        └── wikistream_redpanada_graphana_dashboard.json # Pre-configured dashboard
+```
+
+### Troubleshooting
+
+**Dashboard shows "No data":**
+- Ensure Producer and Consumer are running
+- Check Prometheus targets: `http://localhost:9090/targets`
+- Verify metrics endpoints are accessible:
+  ```bash
+  curl http://localhost:7002/actuator/prometheus  # Producer
+  curl http://localhost:7001/actuator/prometheus  # Consumer
+  ```
+
+**Prometheus can't scrape local apps:**
+- If running apps locally (not in Docker), update `config/prometheus.yml`:
+  ```yaml
+  - targets: ['host.docker.internal:7002']  # Producer
+  - targets: ['host.docker.internal:7001']  # Consumer
+  ```
+---
+
 ## Configuration Reference
 
 ### Supported Environments
@@ -428,7 +788,8 @@ docker compose down
 | Variable | Default | Where | Notes |
 |----------|---------|-------|-------|
 | `APP_AUTH_ENABLED` | `true` | Both | Enable `/v1/auth/*` endpoints |
-| `APP_SESSION_BACKEND` | `redis` (full stack), `in-memory` (dev) | Both | Session storage: `redis` or `in-memory` |
+| `SPRING_DATA_REDIS_HOST` | `localhost` | Both | Redis host (set to `redis` in Docker) |
+| `SPRING_DATA_REDIS_PORT` | `6379` | Both | Redis port |
 | `CONSUMER_PORT` | `7001` | Full stack only | Host port for consumer (container always 7000) |
 | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Dev only | Redpanda broker endpoint |
 | `CASSANDRA_CONTACT_POINTS` | `127.0.0.1` | Dev only | Cassandra host |
@@ -503,6 +864,54 @@ kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true    # Consumer on 7001
   - Old tokens signed with different secret will fail
   - Login again to get new token
 
+- **Clean up Redpanda topics:**
+
+You can delete and purge topics using the Redpanda Console UI or CLI:
+
+**Option 1: Using Redpanda Console UI (Easiest)**
+
+1. Open http://localhost:8080 (Redpanda Console)
+2. Navigate to **Topics** tab
+3. Select the topic you want to delete (e.g., `wiki.recentchange.proto` or `wiki.recentchange.dlq`)
+4. Click the **Delete** button on the topic details page
+5. Confirm deletion
+
+**Option 2: Using the rpk CLI (docker exec)**
+
+```bash
+# List all topics
+docker exec wikistream-redpanda rpk topic list
+
+# Delete a specific topic
+docker exec wikistream-redpanda rpk topic delete wiki.recentchange.proto
+
+# Delete multiple topics at once
+docker exec wikistream-redpanda rpk topic delete wiki.recentchange.proto wiki.recentchange.dlq
+
+# Verify deletion
+docker exec wikistream-redpanda rpk topic list
+```
+
+**Option 3: Purge topic data (keep topic, clear messages)**
+
+If you want to keep the topic but remove all messages:
+
+```bash
+# Purge all messages from a topic (data only, schema intact)
+docker exec wikistream-redpanda rpk topic delete-records wiki.recentchange.proto --before-timestamp 0
+```
+
+**After cleanup, reinitialize topics:**
+
+```bash
+# If you deleted the topics, recreate them
+docker exec wikistream-redpanda rpk topic create wiki.recentchange.proto --partitions 3 --replicas 1 || true
+docker exec wikistream-redpanda rpk topic create wiki.recentchange.dlq --partitions 1 --replicas 1 || true
+
+# Verify
+docker exec wikistream-redpanda rpk topic list
+```
+
 ### Full Stack Issues
 
 - **Containers fail to start:**
@@ -517,12 +926,6 @@ docker compose logs redpanda
   - Verify bundle path in `config/cassandra-astra-secrets.properties`
   - Verify token format: `AstraCS:...`
   - Try warm-up: `bash scripts/astra-warmup-check.sh`
-
----
-
-## Further Reading (Dev Guides)
-
-For detailed setup steps, see `readme_local_launch.md` for comprehensive troubleshooting and IDE configuration.
 
 ---
 
@@ -604,9 +1007,8 @@ curl http://localhost:7000/v1/stats \
 | `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` | Keyspace name |
 | `spring.cassandra.local-datacenter` | `datacenter1` | `CASSANDRA_LOCAL_DATACENTER` | Required for driver |
 | `spring.data.redis.host` | `localhost` | `SPRING_DATA_REDIS_HOST` | Redis host (set to `redis` in Docker) |
-| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` | Redis port |
+| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` | Redis port (required for session storage) |
 | `server.port` | `7000` | `SERVER_PORT` | HTTP server port |
-| `app.session.backend` | `redis` | `APP_SESSION_BACKEND` | Session storage: `redis` or `in-memory` |
 | `app.auth.enabled` | `true` | `APP_AUTH_ENABLED` | Enable/disable auth endpoints |
 | `app.security.jwt.issuer` | _(required)_ | `APP_JWT_ISSUER` | JWT issuer claim |
 | `app.security.jwt.secret` | _(required)_ | `APP_JWT_SECRET` | JWT signing secret (≥32 chars) |
@@ -623,30 +1025,63 @@ curl http://localhost:7000/v1/stats \
 
 ## Tests
 
-### Unit tests (no Docker required)
+### Quick Reference
 
 ```bash
+# Run all unit tests (no Docker required)
+./gradlew test
+
+# Run all integration tests (Docker required - Testcontainers)
+./gradlew integrationTest
+
+# Run everything (CI pipeline)
+./gradlew ciTest
+```
+
+### Unit tests (no Docker required)
+
+Unit tests mock external dependencies and run in-memory:
+
+```bash
+# Core library tests
 ./gradlew :lib:core:test
+
+# Producer tests (parser, publisher, SSE client, metrics)
 ./gradlew :cmd:producer:test
+
+# Consumer tests (batch consumer, services, security, auth)
 ./gradlew :cmd:consumer:test
 ```
 
 Or all at once via the root aggregator:
 
 ```bash
-./gradlew ciTest
+./gradlew test
 ```
 
 ### Integration tests (Docker required)
 
-Integration tests spin up real Cassandra and Redis containers via Testcontainers — no `docker compose up` needed beforehand.
+Integration tests spin up real Cassandra, Redis, and Redpanda containers via Testcontainers — no `docker compose up` needed beforehand.
 
+**Consumer Integration Tests:**
 ```bash
 ./gradlew :cmd:consumer:integrationTest
 ```
 
-Or via root:
+Tests real Cassandra repositories, Redis sessions, and AuthService with actual containers.
 
+**Producer Integration Tests:**
+```bash
+./gradlew :cmd:producer:integrationTest
+```
+
+Tests the complete producer pipeline:
+- Real Wikipedia SSE stream connection
+- Event parsing and validation
+- Redpanda topic publishing (via Testcontainers)
+- Metrics collection
+
+**Run all integration tests:**
 ```bash
 ./gradlew integrationTest
 ```
@@ -655,11 +1090,35 @@ Or via root:
 
 | Suite | Tests | Scope |
 |-------|-------|-------|
-| `lib:core:test` | 1 | Domain model |
-| `cmd:producer:test` | 2 | Parser, publisher |
-| `cmd:consumer:test` | 20 | Services, security, error handling |
-| `cmd:consumer:integrationTest` | 21 | Cassandra repos, Redis sessions, AuthService |
-| **Total** | **44** | |
+| `lib:core:test` | 6 | TopicsTest (raw, proto, dlq), ProtoWikiEventMapper serialization/deserialization |
+| `cmd:producer:test` | 12 | Parser, publisher, SSE client, configuration, ingestion runner, metrics service |
+| `cmd:producer:integrationTest` | 1 | End-to-end producer pipeline with real Redpanda (Testcontainers) |
+| `cmd:consumer:test` | 45 | Batch consumer (proto topic), services, security, auth, error handling |
+| `cmd:consumer:integrationTest` | 28 | Cassandra repos, Redis sessions, AuthService (with real containers) |
+| **Total** | **92** | Comprehensive coverage: protobuf serialization, Redpanda topics, DLQ, JWT auth, session management, metrics |
+
+### Test Structure
+
+**Unit Tests:**
+- Fast execution (< 30 seconds total)
+- No external dependencies
+- Mocked Kafka, Cassandra, Redis
+- Focus: business logic, parsing, serialization
+
+**Integration Tests:**
+- Slower execution (Testcontainers startup overhead)
+- Real external services (Cassandra, Redis, Redpanda)
+- Focus: end-to-end flows, data persistence, message publishing
+
+### Running Tests in CI
+
+```bash
+# Full CI pipeline (unit + integration + linting)
+./gradlew ciTest lintKotlin
+
+# With stacktrace for debugging
+./gradlew ciTest --stacktrace
+```
 
 ---
 
@@ -684,12 +1143,12 @@ detekt config: `config/detekt/detekt.yml`
 
 **Import:** Postman → **Import** → select `postman_collection.json`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BASE_URL` | `http://localhost:7000` | App base URL |
+| Variable | Default                   | Description |
+|----------|---------------------------|-------------|
+| `BASE_URL` | `http://localhost:7001`   | App base URL |
 | `TEST_EMAIL` | `local-test-@example.com` | Auto-replaced with timestamped email on first run |
-| `TEST_PASSWORD` | `StrongPass#123` | Used for register and login |
-| `ACCESS_TOKEN` | _(set by Login request)_ | Bearer token, extracted automatically |
+| `TEST_PASSWORD` | `StrongPass#123`          | Used for register and login |
+| `ACCESS_TOKEN` | _(set by Login request)_  | Bearer token, extracted automatically |
 
 **Request order:**
 1. Health Check
@@ -707,4 +1166,4 @@ detekt config: `config/detekt/detekt.yml`
 |----------|-------------|
 | [`JWT_BEARER_SCHEME.md`](JWT_BEARER_SCHEME.md) | Token structure, signing, validation, revocation lifecycle |
 | [`ACTIVE_USER_SESSIONS.md`](ACTIVE_USER_SESSIONS.md) | Session tracking via Redis, metadata schema, configuration |
-| [`REDPANDA_IMPLEMENTATION_GUIDE.md`](REDPANDA_IMPLEMENTATION_GUIDE.md) | Full migration guide: producer/consumer split, Redpanda setup |
+| [`DOCKER_SETUP.md`](DOCKER_SETUP.md) | Docker Compose configurations, profiles, environment variables |

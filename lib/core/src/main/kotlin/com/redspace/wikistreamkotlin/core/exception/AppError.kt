@@ -19,33 +19,6 @@ sealed class HttpAppError(
         cause = cause,
     )
 
-class WikiStreamConfigurationError(
-    message: String,
-    cause: Throwable? = null,
-) : AppError(
-        type = "wiki_stream_configuration_error",
-        message = message,
-        cause = cause,
-    )
-
-class WikiStreamConnectionError(
-    message: String,
-    cause: Throwable? = null,
-) : AppError(
-        type = "wiki_stream_connection_error",
-        message = message,
-        cause = cause,
-    )
-
-class WikiEventParsingError(
-    message: String,
-    cause: Throwable? = null,
-) : AppError(
-        type = "wiki_event_parsing_error",
-        message = message,
-        cause = cause,
-    )
-
 class RepositoryWriteError(
     message: String,
     cause: Throwable? = null,
@@ -133,18 +106,6 @@ class UnexpectedAppError(
         message = message,
         cause = cause,
     )
-/**
- * Error for malformed Kafka records (invalid JSON, parsing failures).
- * These are data quality issues from upstream and should not be retried.
- */
-class MalformedKafkaRecordError(
-    message: String,
-    cause: Throwable? = null,
-) : AppError(
-    type = "malformed_kafka_record",
-    message = message,
-    cause = cause,
-)
 
 /**
  * Error for failures during Kafka record processing (DB errors, network issues, etc.).
@@ -168,19 +129,6 @@ class ProducerStreamError(
     cause: Throwable? = null,
 ) : AppError(
     type = "producer_stream_error",
-    message = message,
-    cause = cause,
-)
-
-/**
- * Error when Kafka publishing fails.
- * Indicates downstream broker is unavailable or rejection.
- */
-class ProducerPublishError(
-    message: String,
-    cause: Throwable? = null,
-) : AppError(
-    type = "producer_publish_error",
     message = message,
     cause = cause,
 )
