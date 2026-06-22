@@ -96,18 +96,15 @@ tasks.register<Test>("unitTest") {
     useJUnitPlatform()
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
-}
 
-// ---------------------------------------------------------------------------
-// ciTest — CI stage task: runs the full unit-test suite
-//   Usage: ./gradlew ciTest
-// ---------------------------------------------------------------------------
-tasks.register("ciTest") {
-    group = "ci"
-    description = "CI stage: runs all unit tests. No external services required."
-    dependsOn("unitTest", ":cmd:consumer:test")
+    dependsOn(
+        ":cmd:consumer:test",
+        ":cmd:producer:test",
+        ":lib:core:test"
+    )
+
     doLast {
-        logger.lifecycle("✅ ciTest passed: all unit tests reported no failures.")
+        logger.lifecycle("✅ unitTest passed: all unit tests reported no failures.")
     }
 }
 
@@ -118,7 +115,14 @@ tasks.register("ciTest") {
 tasks.register("integrationTest") {
     group = "ci"
     description = "Wrapper task: runs integration tests from consumer module"
-    dependsOn(":cmd:consumer:integrationTest")
+    dependsOn(
+        ":cmd:consumer:integrationTest",
+        ":cmd:producer:integrationTest"
+    )
+
+    doLast {
+        logger.lifecycle("✅ integrationTest passed: all integration tests reported no failures.")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +137,7 @@ tasks.register("lintKotlin") {
     dependsOn("detekt", "ktlintCheck")
 
     // Lint is independent of test tasks — ordering only applies when tasks share the same run.
-    mustRunAfter("ciTest", "integrationTest")
+    mustRunAfter("integrationTest")
 
     doLast {
         logger.lifecycle("✅ lintKotlin passed: detekt and ktlint reported no violations.")
