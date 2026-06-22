@@ -12,6 +12,7 @@ COPY gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.prop
 COPY settings.gradle.kts build.gradle.kts ./
 
 COPY lib/core/build.gradle.kts         lib/core/build.gradle.kts
+COPY lib/kafka/build.gradle.kts        lib/kafka/build.gradle.kts
 COPY cmd/consumer/build.gradle.kts     cmd/consumer/build.gradle.kts
 COPY cmd/producer/build.gradle.kts     cmd/producer/build.gradle.kts
 
@@ -20,6 +21,7 @@ RUN --mount=type=cache,target=/home/gradle/.gradle \
     ./gradlew --no-daemon :cmd:producer:dependencies
 
 COPY lib/core/src     lib/core/src
+COPY lib/kafka/src    lib/kafka/src
 COPY cmd/producer/src cmd/producer/src
 
 RUN --mount=type=cache,target=/home/gradle/.gradle \
