@@ -64,7 +64,14 @@ dependencies {
     testImplementation(platform("org.testcontainers:testcontainers-bom:2.0.4"))
     testImplementation("org.testcontainers:testcontainers")
     testImplementation("org.testcontainers:testcontainers-cassandra")
+    testImplementation("org.testcontainers:testcontainers-kafka")
+    testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    // For Lincheck concurrency testing
+    testImplementation("org.jetbrains.kotlinx:lincheck:2.39")
+    // For property-based testing
+    testImplementation("io.kotest:kotest-property:5.8.0")
+
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

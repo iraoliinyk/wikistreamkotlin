@@ -1,4 +1,4 @@
-package com.redspace.wikistreamkotlin.consumer.exception
+package com.redspace.wikistreamkotlin.exception
 
 import com.redspace.wikistreamkotlin.core.exception.AppError
 import com.redspace.wikistreamkotlin.core.exception.ErrorLogLevel
@@ -6,15 +6,16 @@ import com.redspace.wikistreamkotlin.core.exception.ErrorLogger
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
+enum class AppErrorLogLevel {
+    WARN,
+    ERROR,
+}
+
 @Component
 class ConsumerErrorLogger : ErrorLogger {
     private val logger = LoggerFactory.getLogger(ConsumerErrorLogger::class.java)
 
-    override fun log(
-        error: AppError,
-        level: ErrorLogLevel,
-        context: Map<String, Any?>
-    ) {
+    override fun log(error: AppError, level: ErrorLogLevel, context: Map<String, Any?>) {
         val throwable = error.cause ?: error
         val contextPart =
             if (context.isEmpty()) {
@@ -26,12 +27,13 @@ class ConsumerErrorLogger : ErrorLogger {
             }
         val message =
             "type=${error.type}, " +
-                "message=${error.message}, " +
-                "exception=${throwable::class.qualifiedName}$contextPart"
+                    "message=${error.message}, " +
+                    "exception=${throwable::class.qualifiedName}$contextPart"
 
         when (level) {
             ErrorLogLevel.WARN -> logger.warn(message, throwable)
             ErrorLogLevel.ERROR -> logger.error(message, throwable)
         }
     }
+
 }

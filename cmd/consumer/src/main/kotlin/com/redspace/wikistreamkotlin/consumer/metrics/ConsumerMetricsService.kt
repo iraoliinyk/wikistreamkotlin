@@ -34,4 +34,15 @@ class ConsumerMetricsService(meterRegistry: MeterRegistry) {
     fun incrementEventsFailedToPersist() {
         eventsFailedToPersist.increment()
     }
+    fun recordBatchSuccess(batchId: String, eventCount: Int, durationMs: Long) {
+        // Implementation
+    }
+
+    fun recordBatchFailure(batchId: String, eventCount: Int) {
+        // Implementation
+    }
+
+    fun incrementEventsPersistedToRedpanda(count: Int) {
+        // Implementation
+    }
 }
