@@ -3,7 +3,9 @@ package com.redspace.wikistreamkotlin.consumer.metrics
 
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import org.springframework.stereotype.Service
+import java.util.concurrent.TimeUnit
 
 @Service
 class ConsumerMetricsService(meterRegistry: MeterRegistry) {
@@ -23,26 +25,29 @@ class ConsumerMetricsService(meterRegistry: MeterRegistry) {
         .tag("application", "consumer")
         .register(meterRegistry)
 
-    fun incrementEventsConsumedFromStream() {
-        eventsConsumedFromStream.increment()
+    private val batchesConsumedFromStream: Counter = Counter.builder("wikistream.events.batches.from.stream")
+        .description("Number of batches of events consumed from Redpanda")
+        .tag("application", "consumer")
+        .register(meterRegistry)
+
+    private val batchProcessingDuration: Timer = Timer.builder("wikistream.batch.processing.duration")
+        .description("Time taken to process a batch")
+        .tag("application", "consumer")
+        .publishPercentiles(0.5, 0.95, 0.99)  // Optional: track p50, p95, p99
+        .register(meterRegistry)
+
+    fun recordBatchSuccess(eventCount: Int, durationMs: Long) {
+        eventsConsumedFromStream.increment(eventCount.toDouble())
+        batchProcessingDuration.record(durationMs, TimeUnit.MILLISECONDS)
+        batchesConsumedFromStream.increment()
     }
 
-    fun incrementEventsPersistedToRedpanda() {
-        eventsPersistedToRedpanda.increment()
+    fun recordBatchFailure(eventCount: Int) {
+        eventsFailedToPersist.increment(eventCount.toDouble())
+        batchesConsumedFromStream.increment()
     }
 
-    fun incrementEventsFailedToPersist() {
-        eventsFailedToPersist.increment()
-    }
-    fun recordBatchSuccess(batchId: String, eventCount: Int, durationMs: Long) {
-        // Implementation
-    }
-
-    fun recordBatchFailure(batchId: String, eventCount: Int) {
-        // Implementation
-    }
-
-    fun incrementEventsPersistedToRedpanda(count: Int) {
-        // Implementation
+    fun incrementEventsPersistedToRedpanda(count: Double) {
+        eventsPersistedToRedpanda.increment(count)
     }
 }

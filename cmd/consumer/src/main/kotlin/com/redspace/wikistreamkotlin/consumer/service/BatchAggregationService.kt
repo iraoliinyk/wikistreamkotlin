@@ -15,6 +15,15 @@ class BatchAggregationService {
             .groupBy { it.user?.takeIf(String::isNotBlank) ?: UNKNOWN_USER }
             .mapValues { (_, userEvents) -> toDelta(userEvents) }
 
+    fun aggregateBatchAsSingleDelta(events: List<WikiEvent>): UserStatsDelta =
+        UserStatsDelta(
+            totalMessages = events.size.toLong(),
+            botCount      = events.count { it.bot == true }.toLong(),
+            nonBotCount   = events.count { it.bot != true }.toLong(),
+            serverUrls    = events.mapNotNull { it.serverUrl?.takeIf(String::isNotBlank) },
+            trackedUsers  = events.mapNotNull { it.user?.takeIf(String::isNotBlank) }.toSet(),
+        )
+
     private fun toDelta(events: List<WikiEvent>) = UserStatsDelta(
         totalMessages = events.size.toLong(),
         botCount = events.count { it.bot == true }.toLong(),

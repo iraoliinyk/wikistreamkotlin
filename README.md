@@ -395,8 +395,8 @@ All service ports for local development and Docker deployment:
 | **Producer** | `7002` | `7002` | N/A | Metrics endpoint at `/actuator/prometheus` |
 | **Redpanda (Kafka)** | `19092` | `9092` (internal)<br>`19092` (external) | `19092` | External port for local apps |
 | **Redpanda Console** | `8080` | `8080` | `8080` | Web UI for Kafka topics |
-| **Cassandra** | `19042` | `9042` | `19042` | Dev mode only (not in full stack) |
-| **Redis** | `6379` | `6379` | `6379` | Optional in dev mode, default in full stack |
+| **Cassandra (dev only)** | `19042` | `9042` (each of `cassandra-1/2/3`) | `19042` (cassandra-1 only) | Dev: 3-node cluster on `wikistream-net`; only node-1 published. Prod uses Astra — no container. |
+| **Redis** | `6379` | `6379` | `6379` | Required in both stacks |
 | **Prometheus** | `9090` | `9090` | `9090` | Monitoring (when enabled) |
 | **Grafana** | `3000` | `3000` | `3000` | Dashboards (when enabled) |
 
@@ -410,11 +410,13 @@ All service ports for local development and Docker deployment:
 
 ### Option A — Local IDEs + Docker Infra (Recommended for Development)
 
-Perfect for debugging with IDE breakpoints and local hot-reload. Apps run locally via Gradle/IDE, infrastructure runs in Docker.
+Perfect for debugging with IDE breakpoints and local hot-reload. Apps run locally via Gradle/IDE, infrastructure runs in Docker on the shared `wikistream-net` bridge.
 
 **What you'll run:**
-- **Docker containers:** Redpanda (Kafka), Cassandra, Redis (optional), Monitoring (optional)
-- **Local Gradle:** Consumer app, Producer app
+- **Docker containers:** Redpanda + topic init, **3-node Cassandra cluster** (`cassandra-1/2/3`) + schema init, Redis, Redpanda Console, optional Prometheus + Grafana.
+- **Local Gradle:** Consumer app, Producer app.
+
+The Cassandra topology mirrors the production Astra layout — `NetworkTopologyStrategy { datacenter1: 3 }` with `LOCAL_QUORUM` reads/writes — so the dev keyspace can use the exact same `schema.cql` as production. The Datastax driver only needs to reach **one** node from the host (`cassandra-1` published on `127.0.0.1:19042`); that node acts as coordinator and reaches the other two replicas over the internal Docker network, so quorum is always satisfiable even though only one port is exposed.
 
 ---
 
@@ -423,27 +425,36 @@ Perfect for debugging with IDE breakpoints and local hot-reload. Apps run locall
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Start infrastructure (Redpanda, Cassandra, Redis)
+# Start infrastructure: Redpanda + topics, 3-node Cassandra + schema, Redis, Console
 docker compose -f docker-compose.dev.yml up -d
 
-# With Monitoring (Prometheus + Grafana)
+# With monitoring (Prometheus + Grafana)
 docker compose -f docker-compose.dev.yml --profile monitoring up -d
 ```
 
-**Available profiles:**
-- **`monitoring`**: Adds Prometheus (`:9090`) and Grafana (`:3000`) for metrics visualization
+First boot takes ~2–3 minutes — `cassandra-1` → `cassandra-2` → `cassandra-3` start serially, and `cassandra-1` only reports healthy once `nodetool status` shows three `UN` nodes. The `cassandra-init` job then applies `schema.cql` against the fully-formed cluster.
 
 **What starts by default:**
-- `redpanda` on `localhost:19092` (Kafka-compatible broker)
-- `cassandra` on `localhost:19042` (local database)
+- `redpanda` on `localhost:19092` (Kafka-compatible broker) — topics created by `redpanda-init`
+- `cassandra-1` on `localhost:19042` (only one node is host-published; the cluster has 3 nodes internally)
+- `cassandra-init` (one-shot) applies `cmd/consumer/src/main/resources/db/cassandra/schema.cql` once all 3 nodes are `UN`
+- `redis` on `localhost:6379` (session storage — required)
 - `redpanda-console` on `localhost:8080` (Kafka topic browser)
-- `redis` on `localhost:6379` (session storage)
 
 **Optional profiles:**
-- `prometheus` on `localhost:9090` (with `--profile monitoring`)
-- `grafana` on `localhost:3000` (with `--profile monitoring`)
+- `monitoring` → `prometheus` on `localhost:9090`, `grafana` on `localhost:3000`
 
-> **Note:** Dev mode uses local Cassandra. For Astra (cloud), see Option B.
+**Wait for the cluster to be ready before running the app:**
+
+```bash
+# Should print exactly three UN rows (Up / Normal)
+docker exec wikistream-cassandra-1 nodetool status | grep '^UN' | wc -l   # → 3
+
+# Confirm the schema-init job exited 0 (DDL applied)
+docker logs wikistream-cassandra-init --tail=20
+```
+
+> **Astra alternative.** To point dev at DataStax Astra instead of the local cluster, skip the Cassandra containers (`docker compose -f docker-compose.dev.yml up -d redpanda redpanda-init redis redpanda-console`) and follow Option B's Astra setup. The app will activate the `astra` profile and ignore `spring.cassandra.contact-points`.
 
 ---
 
@@ -454,7 +465,6 @@ Open a new terminal and run:
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Consumer requires Redis for session storage
 APP_JWT_ISSUER=wikistream-local \
 APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
 APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
@@ -467,16 +477,19 @@ CASSANDRA_CONTACT_POINTS=127.0.0.1 \
 CASSANDRA_PORT=19042 \
 CASSANDRA_KEYSPACE_NAME=wikistream \
 CASSANDRA_LOCAL_DATACENTER=datacenter1 \
+CASSANDRA_SCHEMA_ACTION=NONE \
 ./gradlew :cmd:consumer:bootRun
 ```
 
-Consumer will start on **http://localhost:7001**
+Consumer will start on **http://localhost:7001**.
+
+Notes:
+- `CASSANDRA_SCHEMA_ACTION=NONE` is the app default now — DDL is owned by the `cassandra-init` job (dev) or Astra Web UI (prod). Set it to `CREATE_IF_NOT_EXISTS` only if you're pointing at an empty keyspace with no init job.
+- You may see driver log lines like `Cannot reach node cassandra-2/172.x.x.x:9042` from the host — that's expected (Docker bridge IPs aren't routable from macOS). Queries still succeed via the `cassandra-1` coordinator at `LOCAL_QUORUM`.
 
 ---
 
 **3) Run Producer app locally:**
-
-Open another terminal:
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
@@ -485,24 +498,29 @@ SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
 ./gradlew :cmd:producer:bootRun
 ```
 
-Producer will start on **http://localhost:7002** with metrics at `/actuator/prometheus`
+Producer will start on **http://localhost:7002** with metrics at `/actuator/prometheus`.
 
 ---
 
-**4) Verify everything is running:**
+**4) Verify everything is running (incl. the auth regression fix):**
 
 ```bash
-# Consumer health
-curl http://localhost:7000/v1/status
+# Consumer health (when running locally, port is 7001 per SERVER_PORT above)
+curl http://localhost:7001/v1/status
 
 # Producer health
 curl http://localhost:7002/actuator/health
 
-# Producer metrics
-curl http://localhost:7002/actuator/prometheus
+# Auth round-trip — these used to return 500 with the single-node Cassandra setup
+curl -sS -X POST http://localhost:7001/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"test@example.com","password":"password123"}'
+# → 201 Created
 
-# Consumer metrics  
-curl http://localhost:7000/actuator/prometheus
+curl -sS -X POST http://localhost:7001/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"test@example.com","password":"password123"}'
+# → 200 OK + JWT
 
 # Redpanda Console (Kafka UI)
 open http://localhost:8080
@@ -514,8 +532,7 @@ open http://localhost:8080
 
 ```bash
 # Grafana dashboard
-open http://localhost:3000
-# Login: admin / admin
+open http://localhost:3000   # admin / admin
 
 # Prometheus UI
 open http://localhost:9090
@@ -526,12 +543,11 @@ open http://localhost:9090
 **6) Stop everything:**
 
 ```bash
-# Stop Gradle apps (press Ctrl+C in each terminal)
-# OR use helper script
+# Stop Gradle apps (Ctrl+C in each terminal), or:
 bash scripts/stop-local-apps.sh
 
-# Stop Docker infrastructure (dev + monitoring + production stacks)
-docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
+# Tear down infra + wipe volumes (Cassandra data, Redpanda data, etc.)
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans
 ```
 
 Manual alternative:
@@ -542,25 +558,26 @@ pkill -f 'gradle-wrapper.jar :cmd:consumer:bootRun'
 pkill -f 'gradle-wrapper.jar :cmd:producer:bootRun'
 
 # OR kill by port
-kill $(lsof -tiTCP:7000 -sTCP:LISTEN) 2>/dev/null || true  # Consumer
+kill $(lsof -tiTCP:7001 -sTCP:LISTEN) 2>/dev/null || true  # Consumer (SERVER_PORT above)
 kill $(lsof -tiTCP:7002 -sTCP:LISTEN) 2>/dev/null || true  # Producer
 
-# Stop Docker infrastructure (dev + monitoring + production stacks)
-docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans && docker compose -f docker-compose.yml down -v --remove-orphans
+docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-orphans
 ```
 
 ---
 
-### Option B — Full Docker Stack (Production-like)
+### Option B — Full Docker Stack (Production-like, Astra-backed)
 
-All services containerized — Redpanda, Redis, Consumer, Producer, and Astra.
+All app services containerized — Redpanda, Redis, Consumer, Producer — on the shared `wikistream-net`. The datastore is **DataStax Astra** (managed cloud Cassandra), not a local Cassandra cluster: the production stack is intentionally stateless on the local machine so `docker compose down -v` can never destroy user data, and so the runtime topology matches a real multi-region Cassandra deployment.
 
 **1) Prepare Astra credentials (first time only):**
 
 ```bash
-cp config/auth-secrets.properties.template config/auth-secrets.properties
-cp config/cassandra-secrets.properties.template config/cassandra-astra-secrets.properties
+cp config/auth-secrets.properties.template            config/auth-secrets.properties
+cp config/cassandra-astra-secrets.properties.template config/cassandra-astra-secrets.properties
 ```
+
+Edit `config/auth-secrets.properties` and set a 32+ character JWT secret.
 
 Edit `config/cassandra-astra-secrets.properties`:
 
@@ -568,45 +585,48 @@ Edit `config/cassandra-astra-secrets.properties`:
 spring.profiles.active=astra
 astra.db.secure-connect-bundle=./config/secure-connect-<your-db>.zip
 astra.db.token=AstraCS:...your-token...
-ASTRA_DB_KEYSPACE=your-keyspace-name
-ASTRA_DB_LOCAL_DATACENTER=your-datacenter
+ASTRA_DB_KEYSPACE=wikistream
+ASTRA_DB_LOCAL_DATACENTER=<your-astra-region>     # e.g. us-east-2
 ```
 
-Place your `.zip` bundle in `config/`.
+Place the matching `secure-connect-*.zip` bundle in `config/`. Both files are gitignored.
 
 **2) Create schema in Astra (one-time):**
 
-In Astra Web UI → **Data Explorer** → run DDL from `cmd/consumer/src/main/resources/db/cassandra/schema.cql`  
-(skip `CREATE KEYSPACE` and `USE` — Astra manages those).
+In Astra Web UI → **CQL Console** (or **Data Explorer**) → run the DDL from `cmd/consumer/src/main/resources/db/cassandra/schema.cql`. Skip the `CREATE KEYSPACE` and `USE` statements — Astra creates the keyspace for you when you provision the database, and replication is managed at the Astra level (multi-replica, multi-AZ).
 
-**3) Start full stack:**
+**3) Start the stack:**
 
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Default: Redis for sessions, Astra for database, consumer on 7001
 docker compose up --build -d
 
-# OR change consumer port
+# Override the host port for the consumer if needed
 CONSUMER_PORT=8000 docker compose up --build -d
 ```
+
+The consumer container mounts `./config:/app/config:ro`, picks up `cassandra-astra-secrets.properties`, activates the `astra` profile via `spring.profiles.active=astra`, and connects to Astra via the secure-connect bundle. `spring.cassandra.contact-points` is ignored on this profile.
 
 **4) Verify:**
 
 ```bash
 docker compose ps
 
-# Health check
+# Consumer (default host port 7001 → container 7000)
 curl http://localhost:7001/v1/status
 
-# Kafka topics
-docker exec wikistream-redpanda rpk topic list
+# Auth round-trip against Astra
+curl -sS -X POST http://localhost:7001/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@example.com","password":"password123"}'
 
-# Kafka UI
+# Kafka topic listing + UI
+docker exec wikistream-redpanda rpk topic list
 open http://localhost:8080
 ```
 
-**5) Astra warm-up (if DB hibernating):**
+**5) Astra warm-up (if the DB has hibernated):**
 
 ```bash
 bash scripts/astra-warmup-check.sh
@@ -615,8 +635,11 @@ bash scripts/astra-warmup-check.sh
 **6) Stop:**
 
 ```bash
-docker compose down
+docker compose down                       # keep Redpanda volumes
+docker compose down -v --remove-orphans   # wipe local volumes; Astra data is untouched
 ```
+
+> **Why no local Cassandra in this stack?** Production parity with the real datastore — see [Astra notes above](#option-b--full-docker-stack-production-like-astra-backed). For a fully self-hosted prod-equivalent topology, use `docker-compose.dev.yml`, which runs a 3-node `NetworkTopologyStrategy` cluster with the same RF=3 / `LOCAL_QUORUM` semantics Astra provides.
 
 ---
 

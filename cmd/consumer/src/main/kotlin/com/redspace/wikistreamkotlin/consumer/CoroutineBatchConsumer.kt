@@ -47,33 +47,31 @@ class CoroutineBatchConsumer(
         val batchStartTime = System.currentTimeMillis()
         val bucketDay = LocalDate.now(ZoneOffset.UTC).toString()
         val activeUsers = activeUserSessionService.listActiveUsers()
-
         if (activeUsers.isEmpty()) {
             ack.acknowledge()
             return@coroutineScope
         }
 
         val events = records.mapNotNull { it.value() }
+        if (events.isEmpty()) {
+            ack.acknowledge()
+            return@coroutineScope
+        }
 
-        // Pure in-memory aggregation — no I/O
-        val userDeltas = aggregationService.aggregateBatch(events)
-            .filterKeys { it in activeUsers }
-
-        // Concurrent blind writes — one coroutine per user
-        userDeltas.map { (userEmail, delta) ->
-            async {
-                persistUserDelta(userEmail, bucketDay, delta, records)
-            }
+        // ONE aggregate for the whole batch — describes "what happened while
+        // these users were online". The same delta is attributed to every
+        // currently-active user (each row in stats_counters is per-user).
+        val batchDelta = aggregationService.aggregateBatchAsSingleDelta(events)
+        activeUsers.map { userEmail ->
+            async { persistUserDelta(userEmail, bucketDay, batchDelta, records) }
         }.awaitAll()
 
         // Offset committed only after all writes finish.
         // Crash before this point → Kafka redelivers → COUNTER + INSERT are idempotent.
         ack.acknowledge()
-
         metricsService.recordBatchSuccess(
             eventCount = events.size,
-            durationMs = System.currentTimeMillis() - batchStartTime,
-            batchId = records.first().key()
+            durationMs = System.currentTimeMillis() - batchStartTime
         )
     }
 
@@ -90,11 +88,11 @@ class CoroutineBatchConsumer(
                 launch { statsWriteRepository.appendServerUrlEvents(userEmail, bucketDay, delta.serverUrls) }
                 launch { statsWriteRepository.upsertTrackedUsers(userEmail, bucketDay, delta.trackedUsers) }
             }
-            metricsService.incrementEventsPersistedToRedpanda(delta.totalMessages.toInt())
+            metricsService.incrementEventsPersistedToRedpanda(delta.totalMessages.toDouble())
         } catch (ex: Exception) {
             val userRecords = records.filter { it.value()?.user == userEmail }
             userRecords.forEach { dlqPublisher.send(it, ex) }
-            metricsService.incrementEventsFailedToPersist()
+            metricsService.recordBatchFailure(userRecords.size)
         }
     }
 }
