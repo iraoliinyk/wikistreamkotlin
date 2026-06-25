@@ -67,8 +67,10 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-kafka")
     testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
-    // For Lincheck concurrency testing
-    testImplementation("org.jetbrains.kotlinx:lincheck:2.39")
+    // NOTE: Lincheck removed (org.jetbrains.kotlinx:lincheck:2.39).
+    // Its bundled ASM cannot parse JDK 25 class files (major version 69) and its
+    // JVM-wide Java agent corrupts other tests sharing the integrationTest worker.
+    // Concurrency for BatchAggregationService is covered by CounterConcurrencyTest.
     // For property-based testing
     testImplementation("io.kotest:kotest-property:5.8.0")
 
