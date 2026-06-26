@@ -146,6 +146,99 @@ class ProducerIngestionRunnerTest {
         Mockito.verify(metrics).incrementEventsFailedToPersist()
     }
 
+    // Reconnect-resilience tests coverage for the PrematureCloseException
+    // kills the Spring context after 2-5 minutes"
+
+    @Test
+    fun `reconnects after transport-level failure and continues publishing`() {
+        // Given: first subscription explodes mid-stream (simulates Wikimedia closing the
+        // long-poll connection); second subscription emits a real event.
+        val transportFailure = RuntimeException("Connection prematurely closed DURING response")
+        val event = wikiEvent(id = 7L)
+
+        val parser = RecordingParser(mapOf("valid" to event))
+        val recordingPublisher = RecordingPublisher(expectedPublishes = 1)
+        val recordingDlq = RecordingDlqPublisher()
+
+        val streamClient = SequencedWikiStreamClient(
+            listOf(
+                // Flow #1: blows up before yielding anything — must NOT crash the runner.
+                flow<String> { throw transportFailure },
+                // Flow #2: the reconnect attempt — must be subscribed to and drained.
+                flow { emit("valid") },
+                emptyFlow(),
+            )
+        )
+
+        val runner = ProducerIngestionRunner(
+            streamClient = streamClient,
+            parser = parser,
+            publisher = recordingPublisher,
+            dlqPublisher = recordingDlq,
+            errorLogger = errorLogger,
+            producerMetricsService = metrics,
+        )
+
+        runRunnerInBackground(runner).use {
+            // 1s initial backoff + scheduling slack → 3s is plenty.
+            assertTrue(
+                recordingPublisher.awaitPublishes(timeoutMillis = 3000),
+                "Runner must reconnect and publish the event from the second subscription",
+            )
+        }
+
+        // Transport-level failure must NEVER hit the DLQ (would otherwise spam it every
+        // few minutes in production).
+        assertTrue(
+            recordingDlq.sentRecords.isEmpty(),
+            "Transport errors must not be sent to DLQ, got: ${recordingDlq.sentRecords}",
+        )
+
+        // Reconnect must have been counted as such.
+        Mockito.verify(metrics, Mockito.atLeastOnce()).incrementSseReconnects()
+    }
+
+    @Test
+    fun `does not rethrow when stream connection fails (CommandLineRunner must stay alive)`() {
+        // If the runner rethrows, Spring Boot tears down the ApplicationContext — that's
+        // the exact crash this test guards against. We verify by running the runner
+        // directly (no background thread) for a brief window and observing that it
+        // stays inside the reconnect loop instead of escaping with an exception.
+        val streamClient = SequencedWikiStreamClient(
+            listOf(
+                flow<String> { throw RuntimeException("simulated PrematureCloseException") },
+                emptyFlow(),
+                emptyFlow(),
+            )
+        )
+        val runner = ProducerIngestionRunner(
+            streamClient = streamClient,
+            parser = RecordingParser(emptyMap()),
+            publisher = publisher,
+            dlqPublisher = RecordingDlqPublisher(),
+            errorLogger = errorLogger,
+            producerMetricsService = metrics,
+        )
+
+        val thread = Thread({ runner.run() }, "runner-no-rethrow-test").apply {
+            isDaemon = true
+            val uncaught = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+            setUncaughtExceptionHandler { _, ex -> uncaught.set(ex) }
+            start()
+            Thread.sleep(1500)  // long enough for one failure + at least one retry tick
+            interrupt()
+            join(500)
+            // The only acceptable terminal state is "interrupted while delaying" — never
+            // a propagated transport exception.
+            uncaught.get()?.let { ex ->
+                assertTrue(
+                    ex is InterruptedException || ex.cause is InterruptedException,
+                    "Runner must not propagate transport exceptions, but got: $ex",
+                )
+            }
+        }
+        assertTrue(!thread.isAlive, "Runner thread must terminate after interrupt")
+    }
 
     private fun wikiEvent(id: Long): WikiEvent =
         WikiEvent(

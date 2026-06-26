@@ -24,6 +24,15 @@ class ProducerMetricsService(meterRegistry: MeterRegistry) {
         .tag("destination", "redpanda")
         .register(meterRegistry)
 
+    // Counts how many times the producer had to re-open the long-lived Wikimedia SSE
+    // connection. A steady non-zero rate is normal (Wikimedia rotates connections every
+    // few minutes); a sudden spike means upstream instability.
+    private val sseReconnects: Counter = Counter.builder("wikistream.sse.reconnects")
+        .description("Number of times the producer reconnected to the Wikimedia SSE stream")
+        .tag("application", "producer")
+        .tag("source", "wikipedia-sse")
+        .register(meterRegistry)
+
     fun incrementEventsConsumedFromStream() {
         eventsConsumedFromStream.increment()
     }
@@ -34,5 +43,9 @@ class ProducerMetricsService(meterRegistry: MeterRegistry) {
 
     fun incrementEventsFailedToPersist() {
         eventsFailedToPersist.increment()
+    }
+
+    fun incrementSseReconnects() {
+        sseReconnects.increment()
     }
 }
