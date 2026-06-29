@@ -22,7 +22,6 @@ import java.util.Collections
 class CoroutineBatchConsumerTest {
     private val sessionRepository = FakeSessionRepository(setOf("alice@example.com"))
     private val statsWriteRepository = RecordingStatsWriteRepository()
-//    private val statsReadRepository = RecordingStatsReadRepository()
     private val activeUserSessionService = ActiveUserSessionService(
         sessionRepository,
         JwtSecurityProperties("issuer", "12345678901234567890123456789012", 3600L),
@@ -153,12 +152,6 @@ class CoroutineBatchConsumerTest {
 
         override suspend fun upsertTrackedUsers(userEmail: String, bucketDay: String, trackedUsers: Set<String>) {
             // no-op for test
-        }
-    }
-
-    private class RecordingStatsReadRepository : StatsReadRepository {
-        override suspend fun getStatsView(userEmail: String, bucketDay: String): StatsView {
-            return StatsView(userEmail = userEmail, bucketDay = bucketDay)
         }
     }
 }
