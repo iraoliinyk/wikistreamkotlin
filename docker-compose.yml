@@ -17,6 +17,10 @@
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
+networks:
+  wikistream-net:
+    name: wikistream-net
+    driver: bridge
 
 services:
 
@@ -24,6 +28,7 @@ services:
   redpanda:
     image: redpandadata/redpanda:v24.3.14
     container_name: wikistream-redpanda
+    networks: [ wikistream-net ]
     command:
       - redpanda
       - start
@@ -52,6 +57,7 @@ services:
   redpanda-init:
     image: redpandadata/redpanda:v24.3.14
     container_name: wikistream-redpanda-init
+    networks: [ wikistream-net ]
     depends_on:
       redpanda:
         condition: service_healthy
@@ -103,6 +109,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: wikistream-redis
+    networks: [ wikistream-net ]
     ports:
       - "6379:6379"
     healthcheck:
@@ -117,6 +124,7 @@ services:
   redpanda-console:
     image: redpandadata/console:v2.8.1
     container_name: wikistream-redpanda-console
+    networks: [ wikistream-net ]
     depends_on:
       redpanda-init:
         condition: service_completed_successfully
@@ -136,6 +144,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.consumer
+    networks: [ wikistream-net ]
     depends_on:
       redpanda-init:
         condition: service_completed_successfully
@@ -154,6 +163,7 @@ services:
 
   producer:
     container_name: wikistream-producer
+    networks: [ wikistream-net ]
     image: wikistream-producer:latest
     build:
       context: .

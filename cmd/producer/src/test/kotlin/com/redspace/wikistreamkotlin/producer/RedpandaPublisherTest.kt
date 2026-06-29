@@ -16,7 +16,7 @@ class RedpandaPublisherTest {
 
         publisher.publish(event)
 
-        Mockito.verify(kafkaTemplate).send(Topics.PROTO, "Alice", event)
+        Mockito.verify(kafkaTemplate).send(Topics.PROTO, event)
     }
 
     @Test
@@ -25,7 +25,7 @@ class RedpandaPublisherTest {
 
         publisher.publish(event)
 
-        Mockito.verify(kafkaTemplate).send(Topics.PROTO, "unknown", event)
+        Mockito.verify(kafkaTemplate).send(Topics.PROTO, event)
     }
 
     @Test
@@ -34,7 +34,7 @@ class RedpandaPublisherTest {
 
         publisher.publish(event)
 
-        Mockito.verify(kafkaTemplate).send(Mockito.eq(Topics.PROTO), Mockito.eq("Bob"), Mockito.same(event))
+        Mockito.verify(kafkaTemplate).send(Mockito.eq(Topics.PROTO), Mockito.same(event))
     }
 
     private fun wikiEvent(user: String?): WikiEvent =

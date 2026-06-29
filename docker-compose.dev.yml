@@ -1,37 +1,45 @@
 # ─── Development Mode: Infrastructure Only ────────────────────────────────────
-# For running apps locally from IDE with Docker-based infra.
+# For running apps locally from IDE/Gradle with Docker-based infra.
 #
-# Supports:
-#   - Cassandra: local cassandra:5.0 (default)
-#   - Astra: DataStax Astra (cloud) — requires config/cassandra-astra-secrets.properties
-#   - Redis: Required for session storage
+# What this stack provides:
+#   - Redpanda (Kafka-compatible broker)            — localhost:19092
+#   - 3-node Cassandra cluster (RF=3, LOCAL_QUORUM) — localhost:19042 (node-1)
+#   - cassandra-init job that applies schema.cql once the cluster has 3 UN nodes
+#   - Redis (session storage)                       — localhost:6379
+#   - Redpanda Console (Kafka UI)                   — localhost:8080
+#
+# Production parity: matches the Astra topology used by docker-compose.yml
+# (NetworkTopologyStrategy { datacenter1: 3 }) so LOCAL_QUORUM never has to be
+# weakened for dev. The Datastax driver only needs to reach ONE node
+# (cassandra-1, exposed on host port 19042); that node is the coordinator and
+# delegates to the other replicas over the internal Docker network.
 #
 # Example usage:
 #   docker compose -f docker-compose.dev.yml up -d                       # Full infrastructure
 #   docker compose -f docker-compose.dev.yml --profile monitoring up -d  # With Prometheus + Grafana
+#   docker compose -f docker-compose.dev.yml down -v --remove-orphans    # Tear down + wipe volumes
 #
-# ─── Switching Database Backends ────────────────────────────────────────────────
-# LOCAL CASSANDRA (default):
-#   docker compose -f docker-compose.dev.yml up -d
-#   CASSANDRA_CONTACT_POINTS=127.0.0.1 CASSANDRA_PORT=19042 ./gradlew :cmd:consumer:bootRun
+# First boot takes ~2–3 minutes: nodes start serially (cassandra-1 → -2 → -3),
+# and cassandra-1 only reports healthy after `nodetool status` shows three UN nodes.
+# The cassandra-init job then applies schema.cql against the fully-formed cluster.
 #
-# ASTRA CLOUD CASSANDRA:
-#   1. Prepare: cp config/cassandra-astra-secrets.properties.template config/cassandra-astra-secrets.properties
-#   2. Edit file with your Astra credentials (DB ID, region, token)
-#   3. Start infra: docker compose -f docker-compose.dev.yml up -d
-#   4. Run app: ./gradlew :cmd:consumer:bootRun
-#      (app auto-activates astra profile; see config/cassandra-astra-secrets.properties:1)
-#
-# NOTE: The cassandra service ALWAYS starts by default. It does NOT consume resources if apps
-#       use Astra (via spring.profiles.active=astra). To skip cassandra entirely, use profiles:
-#       docker compose -f docker-compose.dev.yml --profile cassandra down
-#       docker compose -f docker-compose.dev.yml up -d  # Skips cassandra
+# ─── Switching to Astra cloud Cassandra ───────────────────────────────────────
+# 1. cp config/cassandra-astra-secrets.properties.template config/cassandra-astra-secrets.properties
+# 2. Fill in Astra DB token, bundle path, keyspace, local-datacenter.
+# 3. Set spring.profiles.active=astra in that file (default in the template).
+# 4. Start infra without the Cassandra cluster:
+#      docker compose -f docker-compose.dev.yml up -d redpanda redpanda-init redis redpanda-console
+# 5. Run the app: it will pick up the astra profile and ignore spring.cassandra.contact-points.
 #
 # ─── Profiles ──────────────────────────────────────────────────────────────────
 # monitoring:  Optional Prometheus + Grafana for metrics visualization
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
+networks:
+  wikistream-net:
+    name: wikistream-net
+    driver: bridge
 
 services:
 
@@ -39,6 +47,7 @@ services:
   redpanda:
     image: redpandadata/redpanda:v24.3.14
     container_name: wikistream-redpanda
+    networks: [ wikistream-net ]
     command:
       - redpanda
       - start
@@ -57,7 +66,7 @@ services:
     ports:
       - "19092:19092"
     healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      test: [ "CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -67,6 +76,7 @@ services:
   redpanda-init:
     image: redpandadata/redpanda:v24.3.14
     container_name: wikistream-redpanda-init
+    networks: [ wikistream-net ]
     depends_on:
       redpanda:
         condition: service_healthy
@@ -113,46 +123,97 @@ services:
            -c compression.type=zstd || true
     restart: "no"
 
-  # ── Cassandra (local development mode) ──────────────────────────────────────
-  # Starts by default. Apps using Astra (spring.profiles.active=astra) will ignore this.
-  # To skip Cassandra entirely: docker compose -f docker-compose.dev.yml down && \
-  #                             docker compose -f docker-compose.dev.yml up -d
-  cassandra:
+  # ── Cassandra 3-node cluster (production-equivalent, RF=3, LOCAL_QUORUM) ─────
+  # Nodes start serially: each waits for the previous to be healthy so the
+  # gossip seed list stabilizes before the next joins. Only node-1 is exposed
+  # to the host (port 19042); the driver only needs ONE reachable contact
+  # point — it talks to that coordinator, which then talks to replicas via
+  # the internal Docker network.
+  cassandra-1:
     image: cassandra:5.0
-    container_name: wikistream-cassandra
+    container_name: wikistream-cassandra-1
+    hostname: cassandra-1
+    networks: [ wikistream-net ]
     ports:
       - "19042:9042"
     environment:
       CASSANDRA_CLUSTER_NAME: wikistream-cluster
       CASSANDRA_DC: datacenter1
+      CASSANDRA_RACK: rack1
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1,cassandra-2
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+      JVM_OPTS: "-Dcassandra.skip_wait_for_gossip_to_settle=0"
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      # Healthy only when the whole cluster has 3 Up/Normal nodes.
+      test: [ "CMD-SHELL", "nodetool status | awk '/^UN/ {c++} END {exit !(c==3)}'" ]
       interval: 15s
       timeout: 10s
-      retries: 20
-      start_period: 60s
+      retries: 40
+      start_period: 90s
+    restart: unless-stopped
+
+  cassandra-2:
+    image: cassandra:5.0
+    container_name: wikistream-cassandra-2
+    hostname: cassandra-2
+    networks: [ wikistream-net ]
+    depends_on:
+      cassandra-1:
+        condition: service_started
+    environment:
+      CASSANDRA_CLUSTER_NAME: wikistream-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1,cassandra-2
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    restart: unless-stopped
+
+
+  cassandra-3:
+    image: cassandra:5.0
+    container_name: wikistream-cassandra-3
+    hostname: cassandra-3
+    networks: [ wikistream-net ]
+    depends_on:
+      cassandra-2:
+        condition: service_started
+    environment:
+      CASSANDRA_CLUSTER_NAME: wikistream-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1,cassandra-2
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
     restart: unless-stopped
 
   cassandra-init:
     image: cassandra:5.0
     container_name: wikistream-cassandra-init
+    networks: [ wikistream-net ]
     depends_on:
-      cassandra:
+      cassandra-1:
+        # cassandra-1 only becomes healthy when all 3 nodes are UN,
+        # so by the time the schema is applied RF=3 is fully satisfiable.
         condition: service_healthy
     volumes:
       - ./cmd/consumer/src/main/resources/db/cassandra/schema.cql:/schema.cql:ro
-    entrypoint: ["/bin/sh", "-c", "cqlsh cassandra 9042 -f /schema.cql"]
+    entrypoint: [ "/bin/sh", "-c", "cqlsh cassandra-1 9042 -f /schema.cql" ]
     restart: "no"
 
   # ── Redis (required for session storage) ───────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: wikistream-redis
+    networks: [ wikistream-net ]
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 2s
       retries: 5
@@ -162,6 +223,7 @@ services:
   # Using v2.8.1 which supports file-based protobuf deserialization + BigInt fix
   redpanda-console:
     image: redpandadata/console:v2.8.1
+    networks: [ wikistream-net ]
     container_name: wikistream-redpanda-console
     depends_on:
       redpanda-init:

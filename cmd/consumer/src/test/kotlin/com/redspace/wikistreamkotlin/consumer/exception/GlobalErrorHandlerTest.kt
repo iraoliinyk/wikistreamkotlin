@@ -1,6 +1,7 @@
 package com.redspace.wikistreamkotlin.consumer.exception
 
 import com.redspace.wikistreamkotlin.core.exception.StatsSnapshotError
+import com.redspace.wikistreamkotlin.exception.ConsumerErrorLogger
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test

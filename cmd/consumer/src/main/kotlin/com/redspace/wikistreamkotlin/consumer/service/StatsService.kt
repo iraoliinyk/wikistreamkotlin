@@ -1,47 +1,35 @@
 package com.redspace.wikistreamkotlin.consumer.service
 
-import com.redspace.wikistreamkotlin.core.domain.WikiEvent
+import com.redspace.wikistreamkotlin.consumer.domain.StatsView
+import com.redspace.wikistreamkotlin.consumer.repository.StatsReadRepository
 import com.redspace.wikistreamkotlin.core.exception.AppError
-import com.redspace.wikistreamkotlin.core.exception.StatsRecordingError
 import com.redspace.wikistreamkotlin.core.exception.StatsSnapshotError
-import com.redspace.wikistreamkotlin.consumer.domain.StatsSnapshot
-import com.redspace.wikistreamkotlin.consumer.repository.StatsRepository
 import kotlinx.coroutines.CancellationException
 import org.springframework.stereotype.Service
+import java.time.LocalDate
+import java.time.ZoneOffset
 
+/**
+ * Read-side service for assembling a user's stats view.
+ *
+ * Write path is handled directly by [com.redspace.wikistreamkotlin.consumer.CoroutineBatchConsumer]
+ * via [com.redspace.wikistreamkotlin.consumer.service.BatchAggregationService] and the write repository.
+ */
 @Service
 class StatsService(
-    private val statsRepository: StatsRepository,
-    private val activeUserSessionService: ActiveUserSessionService,
+    private val statsReadRepository: StatsReadRepository,
 ) {
-    suspend fun recordForActiveUsers(event: WikiEvent) {
+    suspend fun getSnapshotForUser(userEmail: String): StatsView {
+        val bucketDay = LocalDate.now(ZoneOffset.UTC).toString()
         try {
-            val activeUsers = activeUserSessionService.listActiveUsers()
-            for (email in activeUsers) {
-                statsRepository.recordForUser(email, event)
-            }
-        } catch (exception: CancellationException) {
-            throw exception
-        } catch (error: AppError) {
-            throw error
-        } catch (exception: Exception) {
-            throw StatsRecordingError(
-                message = "Failed to record wiki event with id=${event.id} for active users",
-                cause = exception,
-            )
-        }
-    }
-
-    suspend fun getSnapshotForUser(userEmail: String): StatsSnapshot {
-        try {
-            return statsRepository.snapshotForUser(userEmail)
+            return statsReadRepository.getStatsView(userEmail, bucketDay)
         } catch (exception: CancellationException) {
             throw exception
         } catch (error: AppError) {
             throw error
         } catch (exception: Exception) {
             throw StatsSnapshotError(
-                message = "Failed to fetch stats snapshot for user '$userEmail'",
+                message = "Failed to fetch stats view for user '$userEmail'",
                 cause = exception,
             )
         }
