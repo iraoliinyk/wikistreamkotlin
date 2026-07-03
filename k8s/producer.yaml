@@ -47,7 +47,10 @@ spec:
             failureThreshold: 30
             periodSeconds: 5
           readinessProbe:
-            httpGet: { path: /actuator/health/readiness, port: http }
+            # Gate on LIVENESS, not the readiness group: the blocking CommandLineRunner
+            # means /actuator/health/readiness never leaves OUT_OF_SERVICE (503), which
+            # would keep the pod NotReady forever and hang `kubectl rollout status`.
+            httpGet: { path: /actuator/health/liveness, port: http }
             initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
