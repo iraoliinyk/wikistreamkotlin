@@ -3,7 +3,7 @@
 # Use this with docker-compose.dev.yml when running Consumer/Producer apps locally via IDE.
 #
 # Usage:
-#   docker compose -f docker-compose.dev.yml -f code-samples/docker-compose-monitoring.yml up -d --remove-orphans
+#   docker compose -f docker-compose.dev.yml -f config/docker-compose-monitoring.yml up -d --remove-orphans
 #
 # What this provides:
 #   - Prometheus: Scrapes metrics from apps running on host machine (via host.docker.internal)
@@ -29,7 +29,7 @@ services:
       - '--web.enable-lifecycle'
       - '--storage.tsdb.retention.time=7d'
     volumes:
-      - ./config/prometheus-dev.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"

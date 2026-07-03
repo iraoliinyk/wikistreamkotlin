@@ -96,10 +96,6 @@ class GracefulShutdownHandlerTest {
     class TestApp {
         @Bean
         fun kafkaErrorHandler(): DefaultErrorHandler = DefaultErrorHandler { _, _ -> /* no-op */ }
-
-        /** Single-broker test container → RF must be 1. */
-        @Bean
-        fun protoTopic(): NewTopic = NewTopic(Topics.PROTO, TOPIC_PARTITIONS, 1.toShort())
     }
 
     /**
@@ -250,7 +246,23 @@ class GracefulShutdownHandlerTest {
         @DynamicPropertySource
         @JvmStatic
         fun kafkaProperties(registry: DynamicPropertyRegistry) {
+            // Topic creation is owned by redpanda-init in production (not the consumer app),
+            // so we provision it here explicitly before the listener containers start —
+            // guaranteeing TOPIC_PARTITIONS partitions rather than the broker's auto-created
+            // default of 1.
+            createProtoTopic()
             registry.add("spring.kafka.bootstrap-servers") { kafka.bootstrapServers }
+        }
+
+        private fun createProtoTopic() {
+            val props = Properties().apply {
+                put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers)
+            }
+            AdminClient.create(props).use { admin ->
+                admin.createTopics(listOf(NewTopic(Topics.PROTO, TOPIC_PARTITIONS, 1.toShort())))
+                    .all()
+                    .get()
+            }
         }
     }
 }

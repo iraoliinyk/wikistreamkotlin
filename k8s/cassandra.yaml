@@ -25,7 +25,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: cassandra
-          image: cassandra:4.1
+          image: cassandra:5.0
           ports:
             - { name: cql,   containerPort: 9042 }
             - { name: intra, containerPort: 7000 }
@@ -38,7 +38,7 @@ spec:
             - { name: CASSANDRA_RACK,         value: "rack1" }
             - { name: CASSANDRA_ENDPOINT_SNITCH, value: "GossipingPropertyFileSnitch" }
             - name: CASSANDRA_SEEDS
-              value: "cassandra-0.cassandra.wikistream.svc.cluster.local"
+              value: "cassandra-0.cassandra.wikistream.svc.cluster.local,cassandra-1.cassandra.wikistream.svc.cluster.local"
             - name: MAX_HEAP_SIZE
               value: "1G"
             - name: HEAP_NEWSIZE
@@ -48,10 +48,15 @@ spec:
             - name: CASSANDRA_BROADCAST_ADDRESS
               valueFrom: { fieldRef: { fieldPath: status.podIP } }
           readinessProbe:
-            exec: { command: ["/bin/sh","-c","nodetool status | grep -E '^UN'"] }
             initialDelaySeconds: 90
             periodSeconds: 15
             timeoutSeconds: 10
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  nodetool status | grep "$(hostname -i)" | grep -q '^UN'
           volumeMounts:
             - { name: data, mountPath: /var/lib/cassandra }
   volumeClaimTemplates:

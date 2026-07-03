@@ -37,6 +37,23 @@ spec:
         - name: producer
           image: wikistream-producer:latest
           imagePullPolicy: Never           # use local Minikube image
+          # The producer is a background SSE→Kafka pump driven by a blocking
+          # CommandLineRunner, so Spring's ApplicationReadyEvent never fires and
+          # the readiness *group* (/actuator/health/readiness) stays OUT_OF_SERVICE
+          # forever. It serves no inbound traffic (Service is scrape-only), so we
+          # gate on liveness — UP as soon as the management port is serving.
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 15
           ports:
             - { name: http, containerPort: 7002 }
           envFrom:
@@ -44,16 +61,3 @@ spec:
           resources:
             requests: { cpu: "250m", memory: "512Mi" }
             limits:   { cpu: "1",    memory: "1Gi" }
-          readinessProbe:
-            # The producer is a background SSE→Kafka pump driven by a blocking
-            # CommandLineRunner, so Spring's ApplicationReadyEvent never fires and
-            # the readiness *group* (/actuator/health/readiness) stays OUT_OF_SERVICE
-            # forever. It serves no inbound traffic (Service is scrape-only), so we
-            # gate on liveness — UP as soon as the management port is serving.
-            httpGet: { path: /actuator/health/liveness, port: http }
-            initialDelaySeconds: 20
-            periodSeconds: 10
-          livenessProbe:
-            httpGet: { path: /actuator/health/liveness, port: http }
-            initialDelaySeconds: 30
-            periodSeconds: 15

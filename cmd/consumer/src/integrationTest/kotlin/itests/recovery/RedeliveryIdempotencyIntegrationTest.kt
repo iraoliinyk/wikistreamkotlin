@@ -142,10 +142,6 @@ class RedeliveryIdempotencyIntegrationTest {
         @Bean
         fun kafkaErrorHandler(): DefaultErrorHandler = DefaultErrorHandler { _, _ -> /* no-op */ }
 
-        /** Single-broker test container → RF must be 1. Single partition for deterministic redelivery. */
-        @Bean
-        fun protoTopic(): NewTopic = NewTopic(Topics.PROTO, TOPIC_PARTITIONS, 1.toShort())
-
         /**
          * Replace the production [ActiveUserSessionService] (which depends on Redis and the
          * full security stack) with a stub that always reports `alice` as the dashboard owner.
@@ -387,6 +383,10 @@ class RedeliveryIdempotencyIntegrationTest {
         @DynamicPropertySource
         @JvmStatic
         fun dynamicProperties(registry: DynamicPropertyRegistry) {
+            // Topic creation is owned by redpanda-init in production (not the consumer app),
+            // so we provision it here explicitly before the listener container starts rather
+            // than relying on broker auto-creation.
+            createProtoTopic()
             registry.add("spring.kafka.bootstrap-servers") { kafka.bootstrapServers }
             registry.add("spring.cassandra.contact-points") {
                 val cp = cassandra.contactPoint
@@ -394,6 +394,17 @@ class RedeliveryIdempotencyIntegrationTest {
             }
             registry.add("spring.cassandra.local-datacenter") { cassandra.localDatacenter }
             registry.add("spring.cassandra.keyspace-name") { "wikistream_it" }
+        }
+
+        private fun createProtoTopic() {
+            val props = Properties().apply {
+                put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers)
+            }
+            AdminClient.create(props).use { admin ->
+                admin.createTopics(listOf(NewTopic(Topics.PROTO, TOPIC_PARTITIONS, 1.toShort())))
+                    .all()
+                    .get()
+            }
         }
     }
 }

@@ -45,6 +45,8 @@ out/
 
 ### Cassandra / Astra secrets ###
 /config/cassandra-secrets.properties
+config/cassandra-astra-secrets.properties
+config/*secrets*.properties
 /config/*.zip
 /config/auth-secrets.properties
 

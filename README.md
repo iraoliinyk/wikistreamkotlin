@@ -429,7 +429,7 @@ cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 docker compose -f docker-compose.dev.yml up -d
 
 # With monitoring (Prometheus + Grafana)
-docker compose -f docker-compose.dev.yml --profile monitoring up -d
+docker compose -f docker-compose.dev.yml -f config/docker-compose-monitoring.yml up -d
 ```
 
 First boot takes ~2–3 minutes — `cassandra-1` → `cassandra-2` → `cassandra-3` start serially, and `cassandra-1` only reports healthy once `nodetool status` shows three `UN` nodes. The `cassandra-init` job then applies `schema.cql` against the fully-formed cluster.

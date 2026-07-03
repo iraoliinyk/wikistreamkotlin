@@ -3,6 +3,9 @@ package itests.multiconsumer
 import com.redspace.wikistreamkotlin.consumer.config.ConsumerKafkaConfig
 import com.redspace.wikistreamkotlin.core.Topics
 import com.redspace.wikistreamkotlin.core.domain.WikiEvent
+import org.apache.kafka.clients.admin.AdminClient
+import org.apache.kafka.clients.admin.AdminClientConfig
+import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -28,6 +31,7 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.kafka.KafkaContainer
 import java.time.Duration
+import java.util.Properties
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -83,14 +87,6 @@ class MultiConsumerConcurrencyTest {
     class TestApp {
         @Bean
         fun kafkaErrorHandler(): DefaultErrorHandler = DefaultErrorHandler { _, _ -> /* no-op */ }
-
-        /**
-         * Override the production [ConsumerKafkaConfig.protoTopic] bean (which uses RF=3)
-         * so the single-broker test container can create the topic.
-         */
-        @Bean
-        fun protoTopic(): org.apache.kafka.clients.admin.NewTopic =
-            org.apache.kafka.clients.admin.NewTopic(Topics.PROTO, TOPIC_PARTITIONS, 1.toShort())
     }
 
     /**
@@ -161,7 +157,7 @@ class MultiConsumerConcurrencyTest {
 
     companion object {
         const val CONCURRENCY = 4
-        const val TOPIC_PARTITIONS = 6 // matches ConsumerKafkaConfig.protoTopic()
+        const val TOPIC_PARTITIONS = 6
 
         @Container
         @JvmField
@@ -171,7 +167,24 @@ class MultiConsumerConcurrencyTest {
         @DynamicPropertySource
         @JvmStatic
         fun kafkaProperties(registry: DynamicPropertyRegistry) {
+            // Topic creation is owned by redpanda-init in production (not the consumer app),
+            // so we provision it here explicitly before the listener containers start. This
+            // runs during context creation — after the static container is up but before any
+            // consumer subscribes — guaranteeing the topic has TOPIC_PARTITIONS partitions
+            // rather than the broker's auto-created default of 1.
+            createProtoTopic()
             registry.add("spring.kafka.bootstrap-servers") { kafka.bootstrapServers }
+        }
+
+        private fun createProtoTopic() {
+            val props = Properties().apply {
+                put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers)
+            }
+            AdminClient.create(props).use { admin ->
+                admin.createTopics(listOf(NewTopic(Topics.PROTO, TOPIC_PARTITIONS, 1.toShort())))
+                    .all()
+                    .get()
+            }
         }
     }
 }
