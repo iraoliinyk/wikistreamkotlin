@@ -1,0 +1,26 @@
+# servicemonitors.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: wikistream-producer
+  labels: { release: monitoring }
+spec:
+  selector:
+    matchLabels: { app: producer }
+  endpoints:
+    - port: http                       # must match the Service's named port
+      path: /actuator/prometheus
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: wikistream-consumer
+  labels: { release: monitoring }
+spec:
+  selector:
+    matchLabels: { app: consumer }
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s

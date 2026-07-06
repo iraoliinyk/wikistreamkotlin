@@ -3,7 +3,7 @@
 # Use this with docker-compose.dev.yml when running Consumer/Producer apps locally via IDE.
 #
 # Usage:
-#   docker compose -f docker-compose.dev.yml -f code-samples/docker-compose-monitoring.yml up -d --remove-orphans
+#   docker compose -f docker-compose.dev.yml -f config/docker-compose-monitoring.yml up -d --remove-orphans
 #
 # What this provides:
 #   - Prometheus: Scrapes metrics from apps running on host machine (via host.docker.internal)
@@ -28,6 +28,7 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
       - '--storage.tsdb.retention.time=7d'
+    networks: [ wikistream-net ]
     volumes:
       - ./config/prometheus-dev.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -57,6 +58,7 @@ services:
 
       # Plugin installation
       - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel
+    networks: [ wikistream-net ]
     volumes:
       # Datasource provisioning
       - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
@@ -81,6 +83,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+# ── Networks ─────────────────────────────────────────────────────────────────
+# Join the same network as the base dev stack (docker-compose.dev.yml) so
+# Prometheus can scrape redpanda:9644 by service name. Host apps are reached via
+# host.docker.internal, which resolves regardless of the container network.
+networks:
+  wikistream-net:
+    name: wikistream-net
+    driver: bridge
 
 # ── Volumes ────────────────────────────────────────────────────────────────
 volumes:

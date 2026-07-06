@@ -15,6 +15,7 @@ Events are recorded only while a user is logged in. Each authenticated user sees
 - [Project Setup](#project-setup)
 - [Quick Start](#quick-start)
 - [Monitoring with Prometheus & Grafana](#monitoring-with-prometheus--grafana)
+- [Kubernetes Deployment (Minikube)](#kubernetes-deployment-minikube)
 - [Configuration Reference](#configuration-reference)
 - [API Reference](#api-reference)
 - [Tests](#tests)
@@ -429,7 +430,7 @@ cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 docker compose -f docker-compose.dev.yml up -d
 
 # With monitoring (Prometheus + Grafana)
-docker compose -f docker-compose.dev.yml --profile monitoring up -d
+docker compose -f docker-compose.dev.yml -f config/docker-compose-monitoring.yml up -d
 ```
 
 First boot takes ~2–3 minutes — `cassandra-1` → `cassandra-2` → `cassandra-3` start serially, and `cassandra-1` only reports healthy once `nodetool status` shows three `UN` nodes. The `cassandra-init` job then applies `schema.cql` against the fully-formed cluster.
@@ -802,6 +803,263 @@ config/
   - targets: ['host.docker.internal:7002']  # Producer
   - targets: ['host.docker.internal:7001']  # Consumer
   ```
+---
+
+## Kubernetes Deployment (Minikube)
+
+Deploys the full stack to a local Minikube cluster in dependency order: cluster +
+namespace + locally-built images → stateful deps (Redpanda, Redis, 3-node Cassandra)
+→ monitoring (kube-prometheus-stack) → apps (producer, consumer).
+
+Manifests live in `k8s/`. The consumer/producer images are built **inside Minikube's
+Docker daemon** (`imagePullPolicy: Never`), so no registry is required.
+
+### Prerequisites
+
+- `minikube`, `kubectl`, `helm`, and `docker` on your `PATH`
+- Docker Desktop with enough memory allocated (Settings → Resources): the script
+  defaults to a **4 CPU / 12 GiB** Minikube node, and Docker's own VM must be larger
+  than that. 12 GiB fits the whole stack — 3-node Cassandra (~4.5 GiB) + Redpanda +
+  Redis + kube-prometheus-stack (~2.5 GiB) + producer + 2 consumers (measured peaking
+  at ~9.2 GiB). A node too small **OOM-kills the Cassandra pods** — they then come back
+  with new IPs, lose quorum, and every request fails with a 500 (see Troubleshooting).
+  Stop the local Docker Compose dev stack first
+  (`docker compose -f docker-compose.dev.yml down`) so the two don't contend for
+  memory on the same Docker VM.
+- **Resizing the node requires a recreate** — `minikube start --memory` is a no-op on
+  an already-created cluster. The deploy script handles this: if the running node is
+  smaller than `MINIKUBE_MEMORY`, it deletes and recreates it automatically.
+
+### Run
+
+```bash
+bash scripts/k8s-deploy.sh
+```
+
+Tunable via env vars (all optional):
+
+```bash
+# e.g. give the node more room and turn on metrics-server
+MINIKUBE_MEMORY=12288 MINIKUBE_CPUS=6 K8S_VERSION=v1.33.1 \
+  ENABLE_METRICS_SERVER=true bash scripts/k8s-deploy.sh
+```
+
+> Don't set `MINIKUBE_MEMORY` below ~8192 — the 3-node Cassandra StatefulSet will
+> OOM-kill and the rollout will time out.
+
+The script is **idempotent and self-healing**:
+
+- Preflight-checks that `minikube/kubectl/helm/docker` exist.
+- If an existing cluster's API server is **not** Running (a wedged/half-initialised
+  cluster), it deletes it for a clean start; if the API server is still unhealthy
+  after start, it resets once and retries. Health is judged by `/healthz`, not by
+  `minikube start`'s exit code (addon warnings alone don't count as failure).
+- Pins the Kubernetes version (`--kubernetes-version`) and starts with `--wait=all`.
+- Waits for the API server `/healthz` to return `ok` **before** applying anything.
+- Enables `storage-provisioner` and `default-storageclass` **after** the API server
+  is confirmed healthy.
+- Keeps **`metrics-server` out of the `minikube start` bootstrap** (it's opt-in via
+  `ENABLE_METRICS_SERVER=true`). Enabling it during bootstrap registers the
+  `metrics.k8s.io` APIService before its pod is ready, which corrupts the API
+  server's aggregated `/openapi/v2` and makes every other addon apply fail with
+  `failed to download openapi`. When opted in, it is enabled only after the cluster
+  is healthy and its rollout is awaited.
+- Applies the **full `schema.cql` (keyspace + all tables)** to Cassandra once the
+  StatefulSet is ready — not just the keyspace. Creating only the keyspace leaves the
+  app's tables missing and `GET /v1/stats` returns 500 (`table ... does not exist`).
+  The dev-only leading `DROP`s are filtered out and every `CREATE` is `IF NOT EXISTS`,
+  so it's idempotent; the script then verifies `stats_counters` exists before moving on.
+
+### Validate
+
+```bash
+# 0. Manifests are structurally valid (needs a running cluster context).
+#    k8s/servicemonitors.yaml is validated separately — its ServiceMonitor CRD is
+#    installed by the monitoring step, so it won't resolve on a bare cluster.
+kubectl apply --dry-run=client \
+  -f k8s/cassandra.yaml -f k8s/redpanda.yaml -f k8s/redpanda-init-job.yaml \
+  -f k8s/redis.yaml -f k8s/producer.yaml -f k8s/consumer.yaml
+kubectl apply --dry-run=client -f k8s/servicemonitors.yaml   # only after Step 2 (monitoring)
+
+# 1. Everything is scheduled and healthy
+kubectl config set-context --current --namespace=wikistream
+kubectl get pods -o wide
+kubectl get statefulset,deployment,svc
+
+# 2. Rollouts completed
+kubectl rollout status statefulset/redpanda
+kubectl rollout status statefulset/cassandra --timeout=600s
+kubectl rollout status deployment/consumer
+kubectl rollout status deployment/producer
+
+# 3. Cassandra cluster formed (expect three UN rows)
+kubectl exec -it cassandra-0 -- nodetool status
+
+# 4. App health via port-forward
+kubectl port-forward deploy/consumer 7001:7000 &
+curl -s localhost:7001/actuator/health/liveness
+
+# 5. Node/pod resource metrics — only if deployed with ENABLE_METRICS_SERVER=true
+kubectl top nodes
+kubectl top pods
+
+# 6. Grafana (kube-prometheus-stack; admin / admin)
+kubectl port-forward svc/monitoring-grafana 3000:80 &
+# open http://localhost:3000
+```
+
+### Stop and re-run from scratch
+
+Stop the running script with **`Ctrl+C`** — it runs in the foreground, so this
+interrupts it. Note that `Ctrl+C` only stops the *script*; the Minikube cluster and
+whatever it already applied keep running.
+
+Re-run at the level of "scratch" you need:
+
+```bash
+# A) Full from scratch — destroy the cluster (and images built inside it, and PVC
+#    data), then rebuild everything. Use after an interrupted/half-done start.
+minikube delete
+bash scripts/k8s-deploy.sh
+
+# B) Redeploy the app stack only — keep the cluster and the already-built images
+#    (much faster). Wipes Redpanda/Redis/Cassandra/monitoring/apps in the namespace.
+kubectl delete namespace wikistream
+bash scripts/k8s-deploy.sh
+```
+
+The script is idempotent, so re-running is safe: `helm upgrade --install` reconciles
+the monitoring release, the `redpanda-init` Job is deleted before re-apply, and
+namespace creation is a no-op if it exists. If you interrupted `minikube start` and
+left a wedged cluster (`minikube status` shows `apiserver: Stopped`), just re-run —
+the script deletes and recreates it automatically.
+
+### Teardown
+
+```bash
+kubectl delete namespace wikistream        # remove the app stack
+minikube delete                            # destroy the whole cluster
+```
+
+### Troubleshooting
+
+**Addons fail during `minikube start` with `failed to download openapi ... dial tcp
+...:8443: connect: connection refused`** (e.g. `Enabling 'metrics-server' returned an
+error`, `storage-provisioner`, `default-storageclass`, and `Enabled addons:` ends up
+empty):
+
+There are two distinct causes:
+
+1. **`metrics-server` was enabled in the minikube profile and got re-applied during
+   bootstrap.** Its `metrics.k8s.io` APIService is registered before the pod is ready,
+   which breaks the API server's aggregated `/openapi/v2`; every other addon's
+   client-side validation then fails to download the schema. This is the most common
+   cause of a *repeat* failure after a previously-working cluster. Fix — keep it out
+   of bootstrap and enable it later on a healthy cluster:
+   ```bash
+   minikube addons disable metrics-server
+   minikube stop && minikube start --wait=all      # now bootstraps clean
+   # optional, once the cluster is up:
+   minikube addons enable metrics-server
+   kubectl -n kube-system rollout status deployment/metrics-server
+   ```
+   The deploy script keeps `metrics-server` out of bootstrap by default and disables
+   any stale copy before starting, so a plain re-run is normally enough. Only opt in
+   with `ENABLE_METRICS_SERVER=true` (it's enabled post-bootstrap, after `/healthz`).
+
+2. **A corrupted/wedged cluster** — the API server genuinely never came up, so nothing
+   could be applied. Often a version drift (a cluster created by an older Minikube)
+   leaving a kubelet that crash-loops on a missing
+   `/etc/kubernetes/bootstrap-kubelet.conf`. Confirm and fix:
+   ```bash
+   minikube status                   # apiserver: Stopped while host: Running ⇒ wedged
+   minikube logs | grep -i kubelet   # crash-looping kubelet / missing bootstrap conf
+   minikube delete && bash scripts/k8s-deploy.sh   # clean recreate
+   ```
+
+The deploy script detects and recovers from both — disabling stale `metrics-server`
+and deleting a wedged cluster — so a re-run is normally enough.
+
+**Cassandra rollout times out — `Waiting for N pods to be ready...` flaps up and down,
+then `error: timed out waiting for the condition`:**
+
+The Cassandra pods are being **OOM-killed**. Confirm:
+
+```bash
+kubectl get pods -l app=cassandra          # look for STATUS OOMKilled and rising RESTARTS
+kubectl describe pod cassandra-2 | grep -iE 'OOMKilled|Last State'
+```
+
+Cause: the Minikube node is too small for the stack. Each Cassandra pod uses ~1.3–1.8
+GiB and there are three of them, plus Redpanda/Redis — a 6 GiB node can't hold it. The
+subtlety is that the kubelet reports the **whole Docker VM** (e.g. 16 GiB) as node
+capacity, so the scheduler places all three pods; they then blow past the Minikube
+container's real cgroup limit and the kernel OOM-kills a Cassandra JVM.
+
+Fix — give the node enough memory (and remember resizing needs a recreate):
+
+```bash
+minikube delete
+MINIKUBE_MEMORY=12288 bash scripts/k8s-deploy.sh
+```
+
+The script now recreates the node automatically when the running one is smaller than
+`MINIKUBE_MEMORY` (default 12 GiB), and the Cassandra manifest uses a constrained
+768M heap so three replicas fit comfortably.
+
+**Producer rollout hangs — `Waiting for deployment "producer" rollout to finish: 0 of 1
+updated replicas are available...`:**
+
+The pod is `Running` (check `kubectl get pods -l app=producer`) but never becomes
+`Ready`, so the Deployment stays `Available: False` and `rollout status` blocks. Cause:
+the producer is a background SSE→Kafka pump driven by a blocking `CommandLineRunner`,
+so Spring's `ApplicationReadyEvent` never fires and `/actuator/health/readiness` returns
+**503** forever. Its readiness probe must therefore gate on **liveness**, not the
+readiness group — the producer serves no inbound traffic, so "up and serving the
+management port" is the right readiness signal. This is already configured in
+`k8s/producer.yaml`; if you see the hang, confirm the probe:
+
+```bash
+kubectl get pod -l app=producer -o jsonpath='{.items[0].spec.containers[0].readinessProbe.httpGet.path}'
+# expected: /actuator/health/liveness   (NOT /actuator/health/readiness)
+```
+
+**`GET /v1/stats` returns 500 `stats_snapshot_error` / `Failed to fetch stats view`:**
+
+Check the consumer logs for the real cause — it's one of two Cassandra issues:
+
+```bash
+kubectl logs -l app=consumer -n wikistream --tail=50 | grep -iE 'does not exist|UnavailableException|LOCAL_QUORUM'
+```
+
+- **`InvalidQueryException: table stats_counters does not exist`** — the keyspace was
+  created but the tables weren't. The deploy script now applies the full `schema.cql`;
+  if you hit this on an older cluster, apply it manually (dev-only `DROP`s filtered so
+  it's non-destructive):
+  ```bash
+  grep -viE '^[[:space:]]*DROP ' cmd/consumer/src/main/resources/db/cassandra/schema.cql \
+    | kubectl exec -i -n wikistream cassandra-0 -- cqlsh
+  kubectl exec -n wikistream cassandra-0 -- cqlsh \
+    -e "SELECT table_name FROM system_schema.tables WHERE keyspace_name='wikistream';"
+  ```
+- **`UnavailableException: Not enough replicas available ... LOCAL_QUORUM (2 required
+  but only 1 alive)`** — Cassandra lost quorum. Usually a consequence of OOM: pods were
+  killed (`kubectl get pods -l app=cassandra` shows restarts / `exitCode 137`), came
+  back with new IPs, and gossip still lists the old IPs as `DN`
+  (`kubectl exec cassandra-0 -- nodetool status`). Give the node more memory
+  (`MINIKUBE_MEMORY=12288`, requires a recreate) and reform the cluster:
+  ```bash
+  kubectl delete statefulset cassandra -n wikistream --cascade=foreground
+  kubectl delete pvc -l app=cassandra -n wikistream        # dev data only
+  kubectl apply -f k8s/cassandra.yaml
+  kubectl rollout status statefulset/cassandra --timeout=600s
+  # re-apply schema (above), then restart consumers so they reconnect:
+  kubectl rollout restart deployment/consumer -n wikistream
+  ```
+
+Note this is **not** a port problem — the consumer reaches Cassandra fine; the failure
+is missing tables or lost quorum.
+
 ---
 
 ## Configuration Reference

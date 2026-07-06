@@ -1,0 +1,78 @@
+# consumer.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consumer-config
+data:
+  # Cassandra
+  CASSANDRA_CONTACT_POINTS: "cassandra"
+  CASSANDRA_PORT: "9042"
+  CASSANDRA_KEYSPACE_NAME: "wikistream"
+  CASSANDRA_LOCAL_DATACENTER: "datacenter1"
+  CASSANDRA_SCHEMA_ACTION: "CREATE_IF_NOT_EXISTS"
+  # Redis
+  SPRING_DATA_REDIS_HOST: "redis"
+  SPRING_DATA_REDIS_PORT: "6379"
+  # Kafka
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  # Kafka consumer tuning
+  # Bound via Spring relaxed binding into @Value placeholders in ConsumerKafkaConfig.kt;
+  # values mirror the application.properties defaults, so behaviour is unchanged.
+  SPRING_KAFKA_CONSUMER_GROUP_ID: "wiki-consumer"
+  SPRING_KAFKA_CONSUMER_MAX_POLL_RECORDS: "500"
+  APP_KAFKA_CONSUMER_CONCURRENCY: "4"
+  # App behaviour
+  APP_AUTH_ENABLED: "true"
+  APP_JWT_ISSUER: "wikistreamkotlin-k8s"
+  APP_JWT_ACCESS_TOKEN_TTL_SECONDS: "3600"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,prometheus,metrics"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: consumer-secret
+type: Opaque
+stringData:
+  APP_JWT_SECRET: "change-me-to-a-32+-character-production-secret"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consumer
+  labels: { app: consumer }
+spec:
+  selector: { app: consumer }
+  ports:
+    - { name: http, port: 7000, targetPort: 7000 }   # named "http" for ServiceMonitor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: consumer } }
+  template:
+    metadata:
+      labels: { app: consumer }
+    spec:
+      containers:
+        - name: consumer
+          image: wikistream-consumer:latest
+          imagePullPolicy: Never
+          ports:
+            - { name: http, containerPort: 7000 }
+          envFrom:
+            - configMapRef: { name: consumer-config }   # non-secret tunables
+            - secretRef:    { name: consumer-secret }   # JWT secret
+          resources:
+            requests: { cpu: "500m", memory: "768Mi" }
+            limits:   { cpu: "1",    memory: "1536Mi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 45
+            periodSeconds: 15

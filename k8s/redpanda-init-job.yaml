@@ -1,0 +1,31 @@
+# redpanda-init-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-init
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: redpandadata/redpanda:v24.3.14
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              # Gate on the Kafka API (port 9092, exposed by the Service).
+              # `rpk cluster health` is NOT used here: it targets the Admin API
+              # (port 9644, not exposed) and does not accept --brokers.
+              until rpk cluster info --brokers redpanda:9092 >/dev/null 2>&1; do
+                echo "waiting for redpanda..."; sleep 3;
+              done
+              rpk topic create wiki.recentchange.proto --brokers redpanda:9092 \
+                --partitions 6 --replicas 1 \
+                -c cleanup.policy=delete -c retention.ms=604800000 \
+                -c compression.type=zstd -c min.insync.replicas=1 \
+                -c message.timestamp.type=CreateTime -c max.message.bytes=524288 || true
+              rpk topic create wiki.recentchange.dlq --brokers redpanda:9092 \
+                --partitions 1 --replicas 1 \
+                -c cleanup.policy=delete -c retention.ms=604800000 \
+                -c compression.type=zstd || true

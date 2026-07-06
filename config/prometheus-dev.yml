@@ -1,0 +1,58 @@
+# Prometheus configuration — DEV mode (docker-compose.dev.yml + docker-compose-monitoring.yml)
+#
+# In dev mode the producer/consumer apps run on the HOST (IDE/Gradle bootRun), not in
+# containers. Prometheus therefore scrapes them via `host.docker.internal` on their HOST
+# ports (consumer 7001, producer 7002) — NOT the in-container names/ports used by the
+# fully-containerised prod stack (config/prometheus.yml).
+#
+# Redpanda runs as a container on `wikistream-net`, so it is scraped by service name.
+# This requires the prometheus container to be attached to `wikistream-net`
+# (see config/docker-compose-monitoring.yml).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'wikistream-local'
+    environment: 'development'
+
+scrape_configs:
+
+  # ── Producer application (host, port 7002) ──────────────────────────────────
+  - job_name: 'wikistream-producer'
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: [ 'host.docker.internal:7002' ]
+        labels:
+          application: 'producer'
+          service: 'wikistream'
+          component: 'data-ingestion'
+
+  # ── Consumer application (host, port 7001) ──────────────────────────────────
+  - job_name: 'wikistream-consumer'
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: [ 'host.docker.internal:7001' ]
+        labels:
+          application: 'consumer'
+          service: 'wikistream'
+          component: 'data-processing'
+
+  # ── Prometheus self-monitoring ──────────────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: [ 'localhost:9090' ]
+        labels:
+          application: 'prometheus'
+
+  # ── Redpanda (container on wikistream-net, admin API port 9644) ──────────────
+  - job_name: 'redpanda'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: [ 'redpanda:9644' ]
