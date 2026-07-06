@@ -10,27 +10,27 @@ import java.util.concurrent.TimeUnit
 @Service
 class ConsumerMetricsService(meterRegistry: MeterRegistry) {
 
-    private val eventsConsumedFromStream: Counter = Counter.builder("wikistream.events.consumed.from.stream")
+    private val eventsConsumedFromStream: Counter = Counter.builder("wikistream.consumer.events.consumed")
         .description("Number of events consumed from Redpanda")
         .tag("application", "consumer")
         .register(meterRegistry)
 
-    private val eventsPersistedToRedpanda: Counter = Counter.builder("wikistream.events.persisted.to.redpanda")
-        .description("Number of events persisted to DB")
+    private val eventsPersistedToCassandra: Counter = Counter.builder("wikistream.consumer.events.persisted.cassandra")
+        .description("Number of events persisted to Cassandra")
         .tag("application", "consumer")
         .register(meterRegistry)
 
-    private val eventsFailedToPersist: Counter = Counter.builder("wikistream.events.persist.failed")
-        .description("Number of events that failed to persist to DB")
+    private val eventsFailedToPersist: Counter = Counter.builder("wikistream.consumer.events.persist.failed")
+        .description("Number of events that failed to persist to Cassandra")
         .tag("application", "consumer")
         .register(meterRegistry)
 
-    private val batchesConsumedFromStream: Counter = Counter.builder("wikistream.events.batches.from.stream")
+    private val batchesConsumedFromStream: Counter = Counter.builder("wikistream.consumer.batches.processed")
         .description("Number of batches of events consumed from Redpanda")
         .tag("application", "consumer")
         .register(meterRegistry)
 
-    private val batchProcessingDuration: Timer = Timer.builder("wikistream.batch.processing.duration")
+    private val batchProcessingDuration: Timer = Timer.builder("wikistream.consumer.batch.duration")
         .description("Time taken to process a batch")
         .tag("application", "consumer")
         .publishPercentiles(0.5, 0.95, 0.99)  // Optional: track p50, p95, p99
@@ -47,7 +47,7 @@ class ConsumerMetricsService(meterRegistry: MeterRegistry) {
         batchesConsumedFromStream.increment()
     }
 
-    fun incrementEventsPersistedToRedpanda(count: Double) {
-        eventsPersistedToRedpanda.increment(count)
+    fun incrementEventsPersistedToCassandra(count: Double) {
+        eventsPersistedToCassandra.increment(count)
     }
 }

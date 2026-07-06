@@ -88,7 +88,7 @@ class CoroutineBatchConsumer(
                 launch { statsWriteRepository.appendServerUrlEvents(userEmail, bucketDay, delta.serverUrls) }
                 launch { statsWriteRepository.upsertTrackedUsers(userEmail, bucketDay, delta.trackedUsers) }
             }
-            metricsService.incrementEventsPersistedToRedpanda(delta.totalMessages.toDouble())
+            metricsService.incrementEventsPersistedToCassandra(delta.totalMessages.toDouble())
         } catch (ex: Exception) {
             val userRecords = records.filter { it.value()?.user == userEmail }
             userRecords.forEach { dlqPublisher.send(it, ex) }

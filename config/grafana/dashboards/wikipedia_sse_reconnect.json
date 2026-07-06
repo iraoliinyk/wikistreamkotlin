@@ -109,7 +109,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "increase(wikistream_sse_reconnects_total{application=\"producer\"}[5m])",
+          "expr": "increase(wikistream_producer_sse_reconnects_total{application=\"producer\"}[5m])",
           "format": "time_series",
           "instant": true,
           "legendFormat": "__auto",

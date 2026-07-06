@@ -20,11 +20,11 @@ class ConsumerMetricsServiceTest {
     fun `recordBatchSuccess increments events consumed and batches counters`() {
         service.recordBatchSuccess(eventCount = 10, durationMs = 100)
 
-        val eventsConsumedCounter = registry.find("wikistream.events.consumed.from.stream")
+        val eventsConsumedCounter = registry.find("wikistream.consumer.events.consumed")
             .tag("application", "consumer")
             .counter()
 
-        val batchesCounter = registry.find("wikistream.events.batches.from.stream")
+        val batchesCounter = registry.find("wikistream.consumer.batches.processed")
             .tag("application", "consumer")
             .counter()
 
@@ -36,7 +36,7 @@ class ConsumerMetricsServiceTest {
     fun `recordBatchSuccess records batch processing duration`() {
         service.recordBatchSuccess(eventCount = 5, durationMs = 150)
 
-        val timer = registry.find("wikistream.batch.processing.duration")
+        val timer = registry.find("wikistream.consumer.batch.duration")
             .tag("application", "consumer")
             .timer()
 
@@ -48,11 +48,11 @@ class ConsumerMetricsServiceTest {
     fun `recordBatchFailure increments failed persist and batches counters`() {
         service.recordBatchFailure(eventCount = 3)
 
-        val failedCounter = registry.find("wikistream.events.persist.failed")
+        val failedCounter = registry.find("wikistream.consumer.events.persist.failed")
             .tag("application", "consumer")
             .counter()
 
-        val batchesCounter = registry.find("wikistream.events.batches.from.stream")
+        val batchesCounter = registry.find("wikistream.consumer.batches.processed")
             .tag("application", "consumer")
             .counter()
 
@@ -61,10 +61,10 @@ class ConsumerMetricsServiceTest {
     }
 
     @Test
-    fun `incrementEventsPersistedToRedpanda increments the correct counter`() {
-        service.incrementEventsPersistedToRedpanda(5.0)
+    fun `incrementEventsPersistedToCassandra increments the correct counter`() {
+        service.incrementEventsPersistedToCassandra(5.0)
 
-        val counter = registry.find("wikistream.events.persisted.to.redpanda")
+        val counter = registry.find("wikistream.consumer.events.persisted.cassandra")
             .tag("application", "consumer")
             .counter()
 
@@ -72,11 +72,11 @@ class ConsumerMetricsServiceTest {
     }
 
     @Test
-    fun `incrementEventsPersistedToRedpanda can be called multiple times`() {
-        service.incrementEventsPersistedToRedpanda(3.0)
-        service.incrementEventsPersistedToRedpanda(2.0)
+    fun `incrementEventsPersistedToCassandra can be called multiple times`() {
+        service.incrementEventsPersistedToCassandra(3.0)
+        service.incrementEventsPersistedToCassandra(2.0)
 
-        val counter = registry.find("wikistream.events.persisted.to.redpanda")
+        val counter = registry.find("wikistream.consumer.events.persisted.cassandra")
             .tag("application", "consumer")
             .counter()
 
@@ -88,11 +88,11 @@ class ConsumerMetricsServiceTest {
         service.recordBatchSuccess(eventCount = 10, durationMs = 100)
         service.recordBatchSuccess(eventCount = 15, durationMs = 150)
 
-        val eventsConsumedCounter = registry.find("wikistream.events.consumed.from.stream")
+        val eventsConsumedCounter = registry.find("wikistream.consumer.events.consumed")
             .tag("application", "consumer")
             .counter()
 
-        val batchesCounter = registry.find("wikistream.events.batches.from.stream")
+        val batchesCounter = registry.find("wikistream.consumer.batches.processed")
             .tag("application", "consumer")
             .counter()
 
@@ -104,8 +104,8 @@ class ConsumerMetricsServiceTest {
     fun `unrelated counters are not incremented by recordBatchSuccess`() {
         service.recordBatchSuccess(eventCount = 10, durationMs = 100)
 
-        val persisted = registry.find("wikistream.events.persisted.to.redpanda").counter()
-        val failed = registry.find("wikistream.events.persist.failed").counter()
+        val persisted = registry.find("wikistream.consumer.events.persisted.cassandra").counter()
+        val failed = registry.find("wikistream.consumer.events.persist.failed").counter()
 
         assertEquals(0.0, persisted?.count() ?: 0.0)
         assertEquals(0.0, failed?.count() ?: 0.0)

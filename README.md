@@ -674,13 +674,10 @@ config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json
 ```
 
 **Dashboard includes:**
-- Events consumed from Wikipedia SSE stream (Producer)
-- Events persisted to Redpanda (Producer)
 - Events consumed from Redpanda (Consumer)
-- Processing success vs failures (Consumer)
-- Error rate percentage with thresholds
-- Total event counters
-- JVM memory usage
+- Events persisted to Cassandra (Consumer)
+
+A second dashboard, `config/grafana/dashboards/wikipedia_sse_reconnect.json`, tracks producer SSE reconnects (`wikistream_producer_sse_reconnects_total`).
 
 ### Loading the Dashboard
 
@@ -697,7 +694,7 @@ open http://localhost:3000
 # Login: admin / admin
 
 # Dashboard is already loaded!
-# Go to: Dashboards → WikiStream Real-Time Metrics
+# Go to: Dashboards → Wikistream Consumer Metrics
 ```
 
 #### Option 2: Manual Import
@@ -722,39 +719,59 @@ If running Grafana separately or want to import a modified version:
 **Prometheus UI** (`http://localhost:9090`):
 
 ```promql
-# Producer: Events from Wikipedia (per second)
-rate(wikistream_events_consumed_from_stream_total{application="producer"}[1m])
+# Producer: Events from Wikipedia SSE (per second)
+rate(wikistream_producer_events_consumed_sse_total{application="producer"}[1m])
 
-# Producer: Events persisted to Redpanda (per second)
-rate(wikistream_events_persisted_to_redpanda_total{application="producer"}[1m])
+# Producer: Events published to Redpanda (per second)
+rate(wikistream_producer_events_published_total{application="producer"}[1m])
 
-# Consumer: Processing success rate (per second)
-rate(wikistream_events_processed_success_total{application="consumer"}[1m])
+# Producer: Publish failures (per second)
+rate(wikistream_producer_events_publish_failed_total{application="producer"}[1m])
 
-# Consumer: Error rate percentage
+# Producer: SSE reconnects (per 5m window)
+increase(wikistream_producer_sse_reconnects_total{application="producer"}[5m])
+
+# Consumer: Events consumed from Redpanda (per second)
+rate(wikistream_consumer_events_consumed_total{application="consumer"}[1m])
+
+# Consumer: Events persisted to Cassandra (per second)
+rate(wikistream_consumer_events_persisted_cassandra_total{application="consumer"}[1m])
+
+# Consumer: Batches processed (per second)
+rate(wikistream_consumer_batches_processed_total{application="consumer"}[1m])
+
+# Consumer: Batch processing duration p99 (seconds)
+histogram_quantile(0.99, rate(wikistream_consumer_batch_duration_seconds_bucket{application="consumer"}[5m]))
+
+# Consumer: Persist-failure rate percentage
 100 * (
-  rate(wikistream_events_processing_failed_total{application="consumer"}[5m]) 
-  / 
-  (rate(wikistream_events_processed_success_total{application="consumer"}[5m]) 
-   + rate(wikistream_events_processing_failed_total{application="consumer"}[5m]))
+  rate(wikistream_consumer_events_persist_failed_total{application="consumer"}[5m])
+  /
+  (rate(wikistream_consumer_events_consumed_total{application="consumer"}[5m])
+   + rate(wikistream_consumer_events_persist_failed_total{application="consumer"}[5m]))
 )
 ```
 
 ### Available Metrics
 
+> Metric names are namespaced by application (`wikistream.producer.*` / `wikistream.consumer.*`); the Prometheus-exposed form replaces dots with underscores and appends `_total` for counters (e.g. `wikistream_consumer_events_consumed_total`). All series retain the `application` tag.
+
 **Producer Metrics:**
 | Metric | Type | Description |
 |--------|------|-------------|
-| `wikistream_events_consumed_from_stream_total` | Counter | Events consumed from Wikipedia SSE stream |
-| `wikistream_events_persisted_to_redpanda_total` | Counter | Events successfully persisted to Redpanda |
-| `wikistream_events_persist_failed_total` | Counter | Events that failed to persist |
+| `wikistream_producer_events_consumed_sse_total` | Counter | Events consumed from Wikipedia SSE stream |
+| `wikistream_producer_events_published_total` | Counter | Events successfully published to Redpanda |
+| `wikistream_producer_events_publish_failed_total` | Counter | Events that failed to publish to Redpanda |
+| `wikistream_producer_sse_reconnects_total` | Counter | Times the producer reconnected to the Wikimedia SSE stream |
 
 **Consumer Metrics:**
 | Metric | Type | Description |
 |--------|------|-------------|
-| `wikistream_events_consumed_from_redpanda_total` | Counter | Events consumed from Redpanda |
-| `wikistream_events_processed_success_total` | Counter | Events processed successfully |
-| `wikistream_events_processing_failed_total` | Counter | Events that failed processing |
+| `wikistream_consumer_events_consumed_total` | Counter | Events consumed from Redpanda |
+| `wikistream_consumer_events_persisted_cassandra_total` | Counter | Events persisted to Cassandra |
+| `wikistream_consumer_events_persist_failed_total` | Counter | Events that failed to persist to Cassandra |
+| `wikistream_consumer_batches_processed_total` | Counter | Batches of events consumed from Redpanda |
+| `wikistream_consumer_batch_duration_seconds` | Timer | Batch processing duration (p50/p95/p99) |
 
 **Spring Boot Actuator Metrics (automatic):**
 - `jvm_memory_used_bytes` - JVM memory usage

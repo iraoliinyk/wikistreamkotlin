@@ -21,7 +21,7 @@ class ProducerMetricsServiceTest {
         service.incrementEventsConsumedFromStream()
         service.incrementEventsConsumedFromStream()
 
-        val counter = registry.find("wikistream.events.consumed.from.stream")
+        val counter = registry.find("wikistream.producer.events.consumed.sse")
             .tag("application", "producer")
             .tag("source", "wikipedia-sse")
             .counter()
@@ -33,7 +33,7 @@ class ProducerMetricsServiceTest {
     fun `incrementEventsPersistedToRedpanda increments the correct counter`() {
         service.incrementEventsPersistedToRedpanda()
 
-        val counter = registry.find("wikistream.events.persisted.to.redpanda")
+        val counter = registry.find("wikistream.producer.events.published")
             .tag("application", "producer")
             .tag("destination", "redpanda")
             .counter()
@@ -47,7 +47,7 @@ class ProducerMetricsServiceTest {
         service.incrementEventsFailedToPersist()
         service.incrementEventsFailedToPersist()
 
-        val counter = registry.find("wikistream.events.persist.failed")
+        val counter = registry.find("wikistream.producer.events.publish.failed")
             .tag("application", "producer")
             .tag("destination", "redpanda")
             .counter()
@@ -59,8 +59,8 @@ class ProducerMetricsServiceTest {
     fun `unrelated counters are not incremented`() {
         service.incrementEventsConsumedFromStream()
 
-        val persisted = registry.find("wikistream.events.persisted.to.redpanda").counter()
-        val failed = registry.find("wikistream.events.persist.failed").counter()
+        val persisted = registry.find("wikistream.producer.events.published").counter()
+        val failed = registry.find("wikistream.producer.events.publish.failed").counter()
 
         assertEquals(0.0, persisted?.count() ?: 0.0)
         assertEquals(0.0, failed?.count() ?: 0.0)
