@@ -15,6 +15,12 @@ data:
   SPRING_DATA_REDIS_PORT: "6379"
   # Kafka
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+  # Kafka consumer tuning
+  # Bound via Spring relaxed binding into @Value placeholders in ConsumerKafkaConfig.kt;
+  # values mirror the application.properties defaults, so behaviour is unchanged.
+  SPRING_KAFKA_CONSUMER_GROUP_ID: "wiki-consumer"
+  SPRING_KAFKA_CONSUMER_MAX_POLL_RECORDS: "500"
+  APP_KAFKA_CONSUMER_CONCURRENCY: "4"
   # App behaviour
   APP_AUTH_ENABLED: "true"
   APP_JWT_ISSUER: "wikistreamkotlin-k8s"
