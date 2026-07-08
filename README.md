@@ -1,8 +1,12 @@
 # wikistreamkotlin
 
-Spring Boot + Kotlin application that consumes the [Wikimedia recent-change stream](https://stream.wikimedia.org/v2/stream/recentchange), pipes events through **Redpanda** (Kafka-compatible broker), and aggregates per-user stats stored in Cassandra.
+Spring Boot + Kotlin application that consumes the [Wikimedia recent-change stream](https://stream.wikimedia.org/v2/stream/recentchange), 
+pipes events through **Redpanda** (Kafka-compatible broker) — with a declarative 
+**Redpanda Connect (RPCN)** protobuf-validation stage sitting between the producer and the consumer — 
+and aggregates per-user stats stored in Cassandra.
 
-Events are recorded only while a user is logged in. Each authenticated user sees only their own `StatsSnapshot`. Stats pause on logout and resume on the next login.
+Events are recorded only while a user is logged in. Each authenticated user sees only their own `StatsView`. 
+Stats pause on logout and resume on the next login.
 
 ---
 
@@ -10,6 +14,7 @@ Events are recorded only while a user is logged in. Each authenticated user sees
 
 - [Module Structure](#module-structure)
 - [Tech Stack](#tech-stack)
+- [Redpanda Connect (RPCN) Validation Stage](#redpanda-connect-rpcn--protobuf-validation-stage)
 - [Library Versions](#library-versions)
 - [Prerequisites](#prerequisites)
 - [Project Setup](#project-setup)
@@ -49,28 +54,35 @@ wikistreamkotlin/
 │       └── src/main/kotlin/
 │           └── consumer/
 │               ├── ConsumerApplication.kt
-│               ├── RedpandaBatchConsumer.kt    # @KafkaListener batch — processes events
+│               ├── CoroutineBatchConsumer.kt   # suspend @KafkaListener batch — one delta per batch, per-user fan-out
 │               ├── config/
 │               │   ├── ConsumerKafkaConfig.kt           # ConsumerFactory + batchKafkaListenerContainerFactory
+│               │   ├── DlqKafkaConfig.kt                # DLQ producer (ByteArray, acks=all)
+│               │   ├── KafkaErrorHandlerConfig.kt       # DefaultErrorHandler → DLQ (framework-level)
+│               │   ├── GracefulShutdownHandler.kt       # drain listener containers on shutdown
 │               │   ├── RedisConfig.kt                   # Lettuce connection + RedisTemplate
+│               │   ├── CassandraConfig.kt               # ReactiveCassandraTemplate wiring
 │               │   ├── AstraDbConfig.kt                 # CqlSession customizer for Astra
 │               │   ├── AstraDbProperties.kt
-│               │   └── AuthProperties.kt
+│               │   ├── AuthProperties.kt
+│               │   └── JacksonConfig.kt
 │               ├── controller/
 │               │   ├── AuthController.kt       # /v1/auth/*
 │               │   ├── StatsController.kt      # /v1/stats, /v1/status
 │               │   └── dto/AuthDtos.kt
 │               ├── domain/
 │               │   ├── UserAccount.kt
-│               │   ├── StatsSnapshot.kt
+│               │   ├── StatsView.kt            # read-side projection (assembled on demand)
+│               │   ├── UserStatsDelta.kt       # per-batch aggregation delta
 │               │   └── RevokedToken.kt
 │               ├── repository/
-│               │   ├── SessionRepository.kt              # Interface
-│               │   ├── RedisSessionRepository.kt         # Redis-backed session storage
-│               │   ├── UserAccountCassandraRepository.kt # Spring Data
-│               │   ├── StatsRepository.kt                # Interface
-│               │   ├── CassandraStatsRepository.kt       # Optimistic-lock retry loop
-│               │   ├── StatsSnapshotCassandraRepository.kt
+│               │   ├── SessionRepository.kt                # Interface
+│               │   ├── RedisSessionRepository.kt           # Redis-backed session storage
+│               │   ├── UserAccountCassandraRepository.kt   # Spring Data
+│               │   ├── StatsReadRepository.kt              # Read interface (ISP split)
+│               │   ├── StatsWriteRepository.kt             # Write interface (ISP split)
+│               │   ├── CassandraStatsReadRepository.kt     # Assembles StatsView from 3 tables
+│               │   ├── CassandraStatsWriteRepository.kt    # COUNTER + idempotent INSERT writes
 │               │   └── RevokedTokenCassandraRepository.kt
 │               ├── security/
 │               │   ├── SecurityConfig.kt          # JWT filter chain (auth enabled)
@@ -82,29 +94,36 @@ wikistreamkotlin/
 │               ├── service/
 │               │   ├── AuthService.kt
 │               │   ├── StatsService.kt
+│               │   ├── BatchAggregationService.kt   # batch → single UserStatsDelta
 │               │   └── ActiveUserSessionService.kt
-│               └── exception/
-│                   ├── GlobalErrorHandler.kt
-│                   ├── ConsumerErrorLogger.kt
-│                   └── DlqPublisher.kt
+│               ├── metrics/
+│               │   └── ConsumerMetricsService.kt
+│               ├── exception/
+│               │   ├── GlobalErrorHandler.kt
+│               │   └── ConsumerErrorLogger.kt
 │               └── serializer/
 │                   └── ProtoWikiEventDeserializer.kt  # protobuf binary → WikiEvent
 │
 └── lib/
-    └── core/                      # Shared contracts — no Spring Boot dependency
-        ├── src/main/proto/
-        │   └── wikievent.proto           # Protobuf schema for WikiEvent message
+    ├── core/                      # Shared contracts — no Spring Boot dependency
+    │   ├── src/main/proto/
+    │   │   └── wikievent.proto           # Protobuf schema for WikiEvent message
+    │   └── src/main/kotlin/
+    │       └── core/
+    │           ├── Topics.kt                  # Topic name constants (PROTO, VALIDATED, DLQ)
+    │           ├── EventEnvelope.kt
+    │           ├── domain/
+    │           │   ├── WikiEvent.kt
+    │           │   └── WikiEventMeta.kt
+    │           ├── mapper/
+    │           │   └── ProtoWikiEventMapper.kt   # Protobuf serialization ↔ domain model
+    │           └── exception/
+    │               ├── AppError.kt              # error hierarchy
+    │               └── ErrorLogger.kt
+    └── kafka/                     # Shared Kafka utilities — no Spring Boot dependency
         └── src/main/kotlin/
-            └── core/
-                ├── Topics.kt                  # Topic name constants
-                ├── domain/
-                │   ├── WikiEvent.kt
-                │   ├── WikiEventMeta.kt
-                │   └── ... (other POKOs)
-                ├── mapper/
-                │   └── ProtoWikiEventMapper.kt   # Protobuf serialization ↔ domain model
-                └── exception/
-                    └── ... (error hierarchy)
+            └── kafka/
+                └── DlqPublisher.kt   # forwards failed records to wiki.recentchange.dlq
 ```
 
 ### Ownership matrix
@@ -154,27 +173,34 @@ wikistreamkotlin/
 | Component | Version | Role |
 |-----------|---------|------|
 | **Redpanda** | v24.3.14 | Kafka-compatible message broker; decouples producer from consumer via pub-sub topics |
+| **Redpanda Connect (RPCN)** | `redpandadata/connect:4.99.0` | Declarative YAML stream processor; runs the protobuf-validation stage between producer and consumer (see [Redpanda Connect Validation Stage](#redpanda-connect-rpcn--protobuf-validation-stage)) |
 | **Apache Kafka / Spring Kafka** | 4.0.4 | Protocol layer + client libraries for Redpanda integration |
 | **Protocol Buffers (Protobuf)** | proto3 | Binary serialization for `WikiEvent` messages; 75% smaller and 5-10x faster than JSON |
 
 ### Event Streams
 | Topic | Partitions | Replicas | Format | Retention | Purpose | Notes |
 |-------|-----------|----------|--------|-----------|---------|-------|
-| `wiki.recentchange.proto` | 6 | 1 | Protobuf binary | 7 days | **Canonical stream** — all Wikipedia recent-change events encoded as protobuf `WikiEvent` | Compressed with zstd; recommended for all new consumers |
-| `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | default (7 days) | Dead-letter queue for unprocessable records | No explicit retention/compression configured; uses Redpanda defaults. Proto deserialization not enabled in Console. |
+| `wiki.recentchange.proto` | 6 | 1 | Protobuf binary | 7 days | **Producer output / RPCN input** — all Wikipedia recent-change events encoded as protobuf `WikiEvent` | Compressed with zstd. The producer writes here; the RPCN validation stage reads here. |
+| `wiki.recentchange.validated` | 6 | 1 | Protobuf binary | 7 days | **RPCN output / consumer input** — records that passed RPCN protobuf decode/validation | **Byte-identical** to `proto` (RPCN validates, never re-serializes). This is the topic the Spring consumer reads. |
+| `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | default (7 days) | Dead-letter queue for unprocessable records | Two producers share it: RPCN (decode/validation failures) and the consumer's `DlqPublisher` (Cassandra write failures), via one `dlq.*` header contract. |
 
 ### Dead Letter Queue (DLQ) Handling
 
-When the consumer fails to process a record from `wiki.recentchange.proto`, the message is **not lost** — it is forwarded to the `wiki.recentchange.dlq` topic with full error context for debugging and replay.
+`wiki.recentchange.dlq` now has **two producers** (see [Redpanda Connect Validation Stage](#redpanda-connect-rpcn--protobuf-validation-stage)):
+
+- **RPCN** forwards protobuf **decode/validation failures** before they ever reach the consumer.
+- The **consumer** forwards **Cassandra write failures** — when it fails to process a validated record, the message is **not lost**; it is forwarded to `wiki.recentchange.dlq` with full error context for debugging and replay.
+
+Both use the same `dlq.*` header contract, so a single DLQ consumer can read either kind. The rest of this section describes the **consumer-side** (write-failure) path.
 
 **Flow:**
 
 ```
-wiki.recentchange.proto
+wiki.recentchange.validated   (RPCN output — already protobuf-validated)
     ↓
-RedpandaBatchConsumer (batch @KafkaListener)
+CoroutineBatchConsumer (batch @KafkaListener)
     ↓
-StatsService.recordForActiveUsers(event)
+per-user Cassandra write (COUNTER + idempotent INSERT)
     ├─ Success → stats recorded, next record
     └─ Exception thrown
         ↓
@@ -187,7 +213,7 @@ StatsService.recordForActiveUsers(event)
 
 | Layer | Trigger | Handler | Scope |
 |-------|---------|---------|-------|
-| **Application-level** | Exception in `StatsService` (business logic failure) | `RedpandaBatchConsumer.processRecord()` catches and calls `DlqPublisher.send()` | Per-record within a batch — other records in the same batch still process normally |
+| **Application-level** | Cassandra write failure while persisting a batch delta | `CoroutineBatchConsumer.persistUserDelta()` catches per-user and calls `DlqPublisher.send()` | Per-user within a batch — other users' writes in the same batch still complete |
 | **Framework-level** | Deserialization failure or unhandled exception before batch processing | `KafkaErrorHandlerConfig` → Spring's `DefaultErrorHandler` routes to `DlqPublisher` | Entire record rejected before reaching business logic |
 
 **What gets written to DLQ:**
@@ -198,7 +224,7 @@ StatsService.recordForActiveUsers(event)
 | **Value** | Original protobuf bytes (re-serialized via `ProtoWikiEventMapper` if already deserialized) |
 | **Header `dlq.error.message`** | Exception message (e.g., `"Cassandra write timeout"`) |
 | **Header `dlq.error.class`** | Fully-qualified exception class (e.g., `com.datastax.oss.driver.api.core.AllNodesFailedException`) |
-| **Header `dlq.source.topic`** | Source topic name (`wiki.recentchange.proto`) |
+| **Header `dlq.source.topic`** | Source topic name (`wiki.recentchange.validated` for consumer write failures; `wiki.recentchange.proto` for RPCN decode failures) |
 | **Header `dlq.source.partition`** | Partition number where the record originated |
 | **Header `dlq.source.offset`** | Offset of the failed record in the source partition |
 
@@ -212,15 +238,15 @@ StatsService.recordForActiveUsers(event)
 
 **Batch acknowledgment behavior:**
 
-The consumer uses **manual acknowledgment** (`AckMode.MANUAL`). A failed record does NOT block the batch:
+The consumer uses **manual acknowledgment** (`AckMode.MANUAL`). A failed write does NOT block the batch:
 
-1. Batch of N records arrives
-2. Each record is processed concurrently via `async(Dispatchers.Default)`
-3. If record X fails → caught, sent to DLQ, logged as WARN
-4. All other records in the batch continue processing
-5. After all coroutines complete → `ack.acknowledge()` commits the entire batch offset
+1. Batch of N records arrives; `BatchAggregationService` computes **one** `UserStatsDelta` for the whole batch
+2. The delta is attributed to every currently-active user concurrently via `async { }.awaitAll()`
+3. If a user's Cassandra write fails → caught in `persistUserDelta()`, that user's records sent to DLQ, logged as WARN
+4. All other users' writes in the batch continue
+5. After all writes complete → `ack.acknowledge()` commits the entire batch offset
 
-This means: **a single poison message does not stall the consumer group**.
+This means: **a single failing write does not stall the consumer group** — and because writes are COUNTER/idempotent, redelivery is safe.
 
 **Logging:**
 
@@ -257,7 +283,7 @@ docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
 ### Storage
 | Store | Version | Usage |
 |-------|---------|-------|
-| Apache Cassandra | 5.0 | User accounts, stats snapshots, revoked tokens |
+| Apache Cassandra | 5.0 | User accounts, stats counters (COUNTER + append-only tables), revoked tokens |
 | Redis | 7 | Active session tracking (login/logout state + TTL) |
 | DataStax Astra | cloud | Managed Cassandra (optional Astra profile) |
 
@@ -284,6 +310,66 @@ docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
 | Spring Boot Test | (Boot-managed) | Context loading + test slices |
 | Testcontainers | 2.0.4 | Real Cassandra + Redis in integration tests |
 | Reactor Test | (Boot-managed) | Reactive stream assertions |
+
+---
+
+## Redpanda Connect (RPCN) — Protobuf Validation Stage
+
+**Redpanda Connect (RPCN)** is a declarative, YAML-configured stream processor that 
+sits **between the producer and the Spring consumer**. 
+It decodes every protobuf record purely as a **validation check**, forwards the ones 
+that parse to a clean topic, and diverts the ones that don't to the DLQ — so malformed records never reach the consumer.
+
+```
+Wikimedia SSE → producer → wiki.recentchange.proto (6 partitions)
+                                   │
+                                   ▼
+                  ┌─ Redpanda Connect (rpcn/pipeline.yaml) ──────────┐
+                  │  protobuf decode = VALIDATION ONLY               │
+                  │  ├─ valid   → wiki.recentchange.validated        │
+                  │  │            (original bytes, byte-identical)   │
+                  │  └─ invalid → wiki.recentchange.dlq              │
+                  │               (DlqPublisher-compatible headers)  │
+                  │  Prometheus metrics on :4195/metrics             │
+                  └──────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+                  Spring Boot consumer  (reads wiki.recentchange.validated)
+                     ├─ Redis: enumerate currently-active users
+                     ├─ BatchAggregationService → one delta per batch
+                     ├─ per-user Cassandra writes (COUNTER + idempotent INSERT)
+                     ├─ write failures → wiki.recentchange.dlq (DlqPublisher)
+                     └─ ack after all writes
+```
+
+### How it works
+
+- **Pass-through, not re-serialization.** Decode succeeds → the *original* protobuf bytes are republished to `wiki.recentchange.validated` **byte-identical** (the decoded JSON is discarded; only a `validated: "true"` metadata flag is set). This keeps the consumer's `ProtoWikiEventDeserializer` working unchanged and avoids any proto3 round-trip edge cases.
+- **Validation failures → DLQ.** Undecodable records go to `wiki.recentchange.dlq` with the **same five `dlq.*` headers** the consumer's `DlqPublisher` uses (`dlq.error.message`, `dlq.error.class`, `dlq.source.topic`, `dlq.source.partition`, `dlq.source.offset`). RPCN emits the stable discriminator `dlq.error.class = RpcnProtobufValidationError`; the Spring `DlqPublisher` emits real JVM exception class names. One topic, one header schema, two producers.
+- **Consumer target is env-overridable.** `CoroutineBatchConsumer` listens on `${app.kafka.consumer.topic:wiki.recentchange.validated}` (`Topics.VALIDATED`) with consumer group `wiki-consumer`; RPCN uses a distinct group `rpcn-validator`. Rollback is a topic-name flip back to `wiki.recentchange.proto` — no rebuild.
+- **Observability.** RPCN exposes native Prometheus metrics on `:4195/metrics` (scrape job `rpcn` in `config/prometheus.yml` / `config/prometheus-dev.yml`); the connector dashboard lives at `config/grafana/dashboards/rpcn_connector.json`.
+
+**Where it lives:** pipeline `rpcn/pipeline.yaml` (+ native unit tests `rpcn/pipeline_benthos_test.yaml`); compose service `rpcn` in `docker-compose.yml` / `docker-compose.dev.yml`; Kubernetes manifest `k8s/rpcn.yaml` (+ ServiceMonitor in `k8s/servicemonitors.yaml`). Full design rationale: [STREAMING_INSTRUCTIONS.md](STREAMING_INSTRUCTIONS.md) and the trade study in [RedpandaConnect.md](RedpandaConnect.md).
+
+### Why RPCN was added
+
+The consumer was doing **two structurally different jobs** in one runtime, and only one of them is RPCN's sweet spot:
+
+1. **Stateless stream plumbing** — decode protobuf, validate it, route bad records to a DLQ with diagnostic metadata, emit throughput/latency metrics. *Exactly* what Redpanda Connect is built for.
+2. **Stateful business aggregation** — look up the dynamic set of currently-logged-in users from Redis, compute one batch delta, fan it out to N idempotent Cassandra COUNTER/INSERT writes, and ack only when all succeed. Genuinely stateful, session-aware, dynamic-fan-out logic.
+
+RPCN was introduced to **peel off only job #1** into a declarative YAML stage, while the risky stateful path stays in the well-tested Kotlin/Spring consumer. The wins: protobuf validation as a decoupled concern (malformed records never reach the consumer), a standardized DLQ (one header schema for both decode and write failures), and per-stage observability with a dedicated connector dashboard.
+
+### Why it is *not* used for 100% of the pipeline (and the Spring consumer stays)
+
+A full "convert everything to RPCN" would lean hardest on the one component that is weakest — the `cassandra` output:
+
+- **Immature sink.** RPCN's `cassandra` output is **Community-tier / "not production-ready"** per Redpanda's own component tiering, has **no COUNTER-column support**, and its logged-`BATCH` write model is an **anti-pattern for counter columns**. Betting the money-like counter path on it was not worth it.
+- **No-Go constraint.** The dynamic, Redis-driven fan-out (writing the batch delta to *whoever is logged in right now*) has no stock RPCN processor — it would require **custom Go plugins**, which this project deliberately avoids.
+- **Kafka Streams doesn't fit either.** The aggregation is **not keyed on event data** — it's "everything in this poll batch, attributed to whoever is active," the session state lives in **Redis** (external to any stream), and the sink is **Cassandra** (not Kafka). Streams would force a single-task aggregation bottleneck, auth rework or external side-calls, and RocksDB/changelog operational baggage — for the *same* at-least-once + idempotent-writes guarantee the consumer already provides.
+- **Keeps its safety net.** The stateful path retains its integration-test suite (redelivery idempotency, offset-commit timing, multi-consumer concurrency, graceful shutdown), plus the JWT-authenticated REST API and the Redis session *write* path — none of which RPCN has a framework for.
+
+**In short:** RPCN owns the stateless validation/DLQ/observability slice where it is production-grade; the Spring consumer keeps the stateful, session-aware Cassandra aggregation where RPCN (and Kafka Streams) would add cost and risk without any correctness gain. See [STREAMING_INSTRUCTIONS.md §3 and §8](STREAMING_INSTRUCTIONS.md) for the full analysis.
 
 ---
 
@@ -667,16 +753,18 @@ docker compose -f docker-compose.dev.yml --profile monitoring up -d
 
 ### Pre-configured Dashboard
 
-The project includes a ready-to-use Grafana dashboard at:
+The project ships one ready-to-use Grafana dashboard — **"Wikistream Pipeline"** (uid `wikistream-pipeline`) — at:
 ```
-config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json
+config/grafana/dashboards/rpcn_connector.json
 ```
 
-**Dashboard includes:**
-- Events consumed from Redpanda (Consumer)
-- Events persisted to Cassandra (Consumer)
+It is a single end-to-end board with three rows following the data flow:
 
-A second dashboard, `config/grafana/dashboards/wikipedia_sse_reconnect.json`, tracks producer SSE reconnects (`wikistream_producer_sse_reconnects_total`).
+- **Producer — Wikimedia SSE → Redpanda:** events consumed from SSE, published to Redpanda, publish failures, SSE reconnects (`wikistream_producer_*`).
+- **RPCN — Protobuf validation:** events in (`input_received`), events out by destination (`output_sent` — `validated_out` vs the DLQ case), validation/DLQ rate, and decode latency — from RPCN's native metrics (scraped via the `rpcn` job in `config/prometheus.yml` / `config/prometheus-dev.yml`, target `rpcn:4195`). See the [Redpanda Connect validation stage](#redpanda-connect-rpcn--protobuf-validation-stage).
+- **Consumer — persistence:** events consumed from `validated`, persisted to Cassandra, persist failures, batches processed, and batch duration (`wikistream_consumer_*`).
+
+Together the rows give an end-to-end **flow-conservation** view: `producer published ≈ rpcn input_received ≈ rpcn validated_out ≈ consumer events_consumed`.
 
 ### Loading the Dashboard
 
@@ -693,7 +781,7 @@ open http://localhost:3000
 # Login: admin / admin
 
 # Dashboard is already loaded!
-# Go to: Dashboards → Wikistream Consumer Metrics
+# Go to: Dashboards → Wikistream Pipeline
 ```
 
 #### Option 2: Manual Import
@@ -705,7 +793,7 @@ If running Grafana separately or want to import a modified version:
 3. **Navigate**: Click **☰** menu → **Dashboards** → **Import**
 4. **Upload JSON**:
    - Click **Upload JSON file**
-   - Select: `config/grafana/dashboards/wikistream_redpanada_graphana_dashboard.json`
+   - Select: `config/grafana/dashboards/rpcn_connector.json`
    - Or paste JSON content directly
 5. **Configure**:
    - Select **Prometheus** as the data source
@@ -793,13 +881,14 @@ histogram_quantile(0.99, rate(wikistream_consumer_batch_duration_seconds_bucket{
 
 ```
 config/
-├── prometheus.yml                    # Prometheus scrape configuration
+├── prometheus.yml                    # Prometheus scrape config (full stack; incl. rpcn:4195)
+├── prometheus-dev.yml                # Prometheus scrape config (dev stack; incl. rpcn:4195)
 └── grafana/
     ├── datasources/
     │   └── prometheus.yml            # Prometheus datasource config
     ├── dashboards.yml                # Dashboard provider config
     └── dashboards/
-        └── wikistream_redpanada_graphana_dashboard.json # Pre-configured dashboard
+        └── rpcn_connector.json       # "Wikistream Pipeline" dashboard (producer → RPCN → consumer)
 ```
 
 ### Troubleshooting
@@ -1202,7 +1291,7 @@ docker exec wikistream-redpanda rpk topic delete-records wiki.recentchange.proto
 
 ```bash
 # If you deleted the topics, recreate them
-docker exec wikistream-redpanda rpk topic create wiki.recentchange.proto --partitions 3 --replicas 1 || true
+docker exec wikistream-redpanda rpk topic create wiki.recentchange.proto --partitions 6 --replicas 1 || true
 docker exec wikistream-redpanda rpk topic create wiki.recentchange.dlq --partitions 1 --replicas 1 || true
 
 # Verify
@@ -1246,17 +1335,19 @@ docker compose logs redpanda
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/v1/stats` | ✅ Bearer | Returns authenticated user's `StatsSnapshot` |
+| `GET` | `/v1/stats` | ✅ Bearer | Returns authenticated user's `StatsView` |
 
-`StatsSnapshot` fields:
+`StatsView` is a read-side projection assembled on demand from the Cassandra COUNTER + append-only tables (it is never written directly). Fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `userEmail` | `String` | Authenticated user the view belongs to |
+| `bucketDay` | `String` | Day bucket the stats are aggregated under (`YYYY-MM-DD`) |
 | `totalMessages` | `Long` | Messages received while logged in |
 | `distinctUsers` | `Int` | Distinct Wikipedia usernames seen |
 | `botCount` | `Long` | Bot-authored edits |
 | `nonBotCount` | `Long` | Human-authored edits |
-| `countByServerUrl` | `Map<String,Int>` | Edits per Wikipedia server |
+| `countByServerUrl` | `Map<String,Long>` | Edits per Wikipedia server |
 
 ### Quick flow
 
@@ -1298,7 +1389,9 @@ curl http://localhost:7000/v1/stats \
 |----------|---------|--------------|-------|
 | `spring.kafka.bootstrap-servers` | `localhost:19092` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | Redpanda broker |
 | `spring.kafka.consumer.group-id` | `wiki-consumer` | — | Kafka consumer group |
-| `spring.kafka.consumer.max-poll-records` | `50` | — | Batch size |
+| `app.kafka.consumer.topic` | `wiki.recentchange.validated` | `APP_KAFKA_CONSUMER_TOPIC` | Topic the consumer reads (RPCN output). Flip to `wiki.recentchange.proto` to bypass RPCN — see [rollback](#redpanda-connect-rpcn--protobuf-validation-stage) |
+| `app.kafka.consumer.concurrency` | `4` | `APP_KAFKA_CONSUMER_CONCURRENCY` | Number of concurrent batch listener containers |
+| `spring.kafka.consumer.max-poll-records` | `500` | — | Batch size |
 | `spring.cassandra.contact-points` | `localhost` | `CASSANDRA_CONTACT_POINTS` | Local: `127.0.0.1` or `cassandra` (Docker) |
 | `spring.cassandra.port` | `9042` | `CASSANDRA_PORT` | Docker maps container 9042 → host 19042 |
 | `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` | Keyspace name |
