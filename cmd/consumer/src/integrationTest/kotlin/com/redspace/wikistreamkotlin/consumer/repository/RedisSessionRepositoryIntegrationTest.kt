@@ -2,7 +2,6 @@ package com.redspace.wikistreamkotlin.consumer.repository
 
 import com.redspace.wikistreamkotlin.consumer.ConsumerApplication
 import com.redspace.wikistreamkotlin.consumer.SharedIntegrationTestConfig
-import com.redspace.wikistreamkotlin.consumer.testsupport.NoOpStatsSnapshotCassandraRepositoryConfig
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -11,6 +10,8 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
+import org.mockito.Mockito
+import org.springframework.data.cassandra.core.ReactiveCassandraTemplate
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.RedisTemplate
@@ -25,15 +26,16 @@ import java.util.concurrent.TimeUnit
         ConsumerApplication::class,
         SharedIntegrationTestConfig::class,
         RedisSessionRepositoryIntegrationTest.TestRedisConfig::class,
-        NoOpStatsSnapshotCassandraRepositoryConfig::class,
     ],
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = [
         "spring.main.web-application-type=none",
         "app.session.backend=redis",
-        "spring.autoconfigure.exclude=" +
-                "org.springframework.boot.cassandra.autoconfigure.CassandraAutoConfiguration," +
-                "org.springframework.boot.cassandra.autoconfigure.CassandraDataAutoConfiguration",
+        // Cassandra autoconfiguration is disabled globally via integrationTest
+        // application.properties; this test loads the full ConsumerApplication, so the
+        // real CassandraStats*Repository beans need a stand-in ReactiveCassandraTemplate
+        // (provided as a @Primary mock in TestRedisConfig). This test only exercises the
+        // Redis-backed session repository, so Cassandra is never touched.
     ],
 )
 @Testcontainers
@@ -59,6 +61,17 @@ class RedisSessionRepositoryIntegrationTest {
                 hashValueSerializer = StringRedisSerializer()
                 afterPropertiesSet()
             }
+
+        /**
+         * Cassandra autoconfiguration is excluded for integration tests, but the full
+         * ConsumerApplication scan still wires the real CassandraStats*Repository beans,
+         * which require a ReactiveCassandraTemplate. This test never touches Cassandra,
+         * so a mock stand-in is sufficient to let the context start.
+         */
+        @Bean
+        @Primary
+        fun testReactiveCassandraTemplate(): ReactiveCassandraTemplate =
+            Mockito.mock(ReactiveCassandraTemplate::class.java)
     }
 
     @Autowired

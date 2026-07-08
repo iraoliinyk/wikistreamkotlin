@@ -4,11 +4,8 @@ import com.redspace.wikistreamkotlin.consumer.domain.StatsView
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.reactor.awaitSingleOrNull
-import mu.KotlinLogging
 import org.springframework.data.cassandra.core.ReactiveCassandraTemplate
 import org.springframework.stereotype.Repository
-
-private val logger = KotlinLogging.logger {}
 
 @Repository
 class CassandraStatsReadRepository(
