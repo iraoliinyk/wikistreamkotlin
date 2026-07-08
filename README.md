@@ -369,8 +369,6 @@ A full "convert everything to RPCN" would lean hardest on the one component that
 - **Kafka Streams doesn't fit either.** The aggregation is **not keyed on event data** — it's "everything in this poll batch, attributed to whoever is active," the session state lives in **Redis** (external to any stream), and the sink is **Cassandra** (not Kafka). Streams would force a single-task aggregation bottleneck, auth rework or external side-calls, and RocksDB/changelog operational baggage — for the *same* at-least-once + idempotent-writes guarantee the consumer already provides.
 - **Keeps its safety net.** The stateful path retains its integration-test suite (redelivery idempotency, offset-commit timing, multi-consumer concurrency, graceful shutdown), plus the JWT-authenticated REST API and the Redis session *write* path — none of which RPCN has a framework for.
 
-**In short:** RPCN owns the stateless validation/DLQ/observability slice where it is production-grade; the Spring consumer keeps the stateful, session-aware Cassandra aggregation where RPCN (and Kafka Streams) would add cost and risk without any correctness gain. See [STREAMING_INSTRUCTIONS.md §3 and §8](STREAMING_INSTRUCTIONS.md) for the full analysis.
-
 ---
 
 ## Library Versions
