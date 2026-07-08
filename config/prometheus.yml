@@ -77,3 +77,11 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 15s
     scrape_timeout: 10s
+
+  # ────────────────────────────────────────────────────────────────
+  # Redpanda Connect
+  # ────────────────────────────────────────────────────────────────
+  - job_name: 'rpcn'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: [ "rpcn:4195" ]

@@ -47,7 +47,7 @@ services:
     ports:
       - "19092:19092"
     healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      test: [ "CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -65,17 +65,9 @@ services:
       - /bin/sh
       - -c
       - |
-        # DEPRECATED — JSON-based raw stream, kept for backward-compatibility only
-        rpk topic create wiki.recentchange.raw \
-          --brokers redpanda:9092 \
-          --partitions 3 --replicas 1 \
-          -c cleanup.policy=delete \
-          -c retention.ms=86400000 \
-          -c compression.type=producer || true
-
-        # Canonical Protobuf event stream — supersedes wiki.recentchange.raw
+        # Canonical Protobuf event stream
         #
-        # partitions=6 : 2× raw, room for parallel consumers without rebalance overhead
+        # partitions=6 : room for parallel consumers without rebalance overhead
         # cleanup.policy=delete : time-based expiry; compaction makes no sense for immutable edits
         # retention.ms=604800000 : 7-day window — protobuf is ~75 % smaller than JSON so the
         #                          same storage budget now covers a full week of edits
@@ -102,7 +94,12 @@ services:
            -c cleanup.policy=delete \
            -c retention.ms=604800000 \
            -c compression.type=zstd || true
-
+        
+        rpk topic create wiki.recentchange.validated --brokers redpanda:9092 \
+          --partitions 6 --replicas 1 \
+          -c cleanup.policy=delete -c retention.ms=604800000 \
+          -c compression.type=zstd -c min.insync.replicas=1 \
+          -c message.timestamp.type=CreateTime -c max.message.bytes=524288 || true
     restart: "no"
 
   # ── Redis ──────────────────────────────────────────────────────────────────
@@ -113,7 +110,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 2s
       retries: 5
@@ -137,6 +134,27 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  rpcn:
+    image: redpandadata/connect:4.99.0     # pin; verify latest 4.x at implementation time
+    container_name: wikistream-rpcn
+    networks: [ wikistream-net ]
+    command: [ "run", "/etc/rpcn/pipeline.yaml" ]
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./rpcn/pipeline.yaml:/etc/rpcn/pipeline.yaml:ro
+      - ./lib/core/src/main/proto:/etc/rpcn/proto:ro
+    environment:
+      RPCN_BROKERS: redpanda:9092
+    ports: [ "4195:4195" ]
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:4195/ready" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   # ─── Application services ──────────────────────────────────────────────────
   consumer:
     container_name: wikistream-consumer
@@ -149,6 +167,8 @@ services:
       redpanda-init:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      rpcn:
         condition: service_healthy
     volumes:
       - ./config:/app/config:ro

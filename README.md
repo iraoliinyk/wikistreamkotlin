@@ -161,7 +161,6 @@ wikistreamkotlin/
 | Topic | Partitions | Replicas | Format | Retention | Purpose | Notes |
 |-------|-----------|----------|--------|-----------|---------|-------|
 | `wiki.recentchange.proto` | 6 | 1 | Protobuf binary | 7 days | **Canonical stream** — all Wikipedia recent-change events encoded as protobuf `WikiEvent` | Compressed with zstd; recommended for all new consumers |
-| `wiki.recentchange.raw` | 3 | 1 | JSON | 1 day | ~~Legacy JSON stream~~ **DEPRECATED** — kept for backward compatibility only | Migrate consumers to `proto` topic |
 | `wiki.recentchange.dlq` | 1 | 1 | Protobuf binary | default (7 days) | Dead-letter queue for unprocessable records | No explicit retention/compression configured; uses Redpanda defaults. Proto deserialization not enabled in Console. |
 
 ### Dead Letter Queue (DLQ) Handling
@@ -1388,7 +1387,7 @@ Tests the complete producer pipeline:
 
 | Suite | Tests | Scope |
 |-------|-------|-------|
-| `lib:core:test` | 6 | TopicsTest (raw, proto, dlq), ProtoWikiEventMapper serialization/deserialization |
+| `lib:core:test` | 6 | TopicsTest (proto, dlq, validated), ProtoWikiEventMapper serialization/deserialization |
 | `cmd:producer:test` | 12 | Parser, publisher, SSE client, configuration, ingestion runner, metrics service |
 | `cmd:producer:integrationTest` | 1 | End-to-end producer pipeline with real Redpanda (Testcontainers) |
 | `cmd:consumer:test` | 45 | Batch consumer (proto topic), services, security, auth, error handling |

@@ -1,7 +1,9 @@
--- Development only: drop old schema
-DROP MATERIALIZED VIEW IF EXISTS stats_snapshots_latest;
-DROP TABLE IF EXISTS stats_snapshots;
-DROP TABLE IF EXISTS batch_processing_state;
+-- Development only: wipe and recreate the keyspace. Dropping the keyspace removes
+-- ALL objects inside it — including any stale ones from older schema versions
+-- (e.g. the former stats_snapshots / stats_snapshots_latest / batch_processing_state).
+-- Do NOT add unqualified `DROP TABLE ...` statements above the `USE` below: they run
+-- with no keyspace in scope and fail with "No keyspace has been specified", which makes
+-- cqlsh exit non-zero and breaks the cassandra-init job.
 DROP KEYSPACE IF EXISTS wikistream;
 
 CREATE KEYSPACE IF NOT EXISTS wikistream

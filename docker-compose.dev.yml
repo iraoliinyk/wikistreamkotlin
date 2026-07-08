@@ -84,17 +84,9 @@ services:
       - /bin/sh
       - -c
       - |
-        # DEPRECATED — JSON-based raw stream, kept for backward-compatibility only
-        rpk topic create wiki.recentchange.raw \
-          --brokers redpanda:9092 \
-          --partitions 3 --replicas 1 \
-          -c cleanup.policy=delete \
-          -c retention.ms=86400000 \
-          -c compression.type=producer || true
-
-        # Canonical Protobuf event stream — supersedes wiki.recentchange.raw
+        # Canonical Protobuf event stream
         #
-        # partitions=6 : 2× raw, room for parallel consumers without rebalance overhead
+        # partitions=6 : room for parallel consumers without rebalance overhead
         # cleanup.policy=delete : time-based expiry; compaction makes no sense for immutable edits
         # retention.ms=604800000 : 7-day window — protobuf is ~75 % smaller than JSON so the
         #                          same storage budget now covers a full week of edits
@@ -121,6 +113,12 @@ services:
            -c cleanup.policy=delete \
            -c retention.ms=604800000 \
            -c compression.type=zstd || true
+        
+        rpk topic create wiki.recentchange.validated --brokers redpanda:9092 \
+          --partitions 6 --replicas 1 \
+          -c cleanup.policy=delete -c retention.ms=604800000 \
+          -c compression.type=zstd -c min.insync.replicas=1 \
+          -c message.timestamp.type=CreateTime -c max.message.bytes=524288 || true
     restart: "no"
 
   # ── Cassandra 3-node cluster (production-equivalent, RF=3, LOCAL_QUORUM) ─────
@@ -237,3 +235,68 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  rpcn:
+    image: redpandadata/connect:4.99.0     # pin; verify latest 4.x at implementation time
+    container_name: wikistream-rpcn
+    networks: [ wikistream-net ]
+    command: [ "run", "/etc/rpcn/pipeline.yaml" ]
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./rpcn/pipeline.yaml:/etc/rpcn/pipeline.yaml:ro
+      - ./lib/core/src/main/proto:/etc/rpcn/proto:ro
+    environment:
+      RPCN_BROKERS: redpanda:9092
+    ports: [ "4195:4195" ]
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:4195/ready" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Consumer (in-network dev) ───────────────────────────────────────────────
+  # Runs the consumer INSIDE wikistream-net so it can reach the 3-node Cassandra
+  # cluster at its advertised internal addresses (172.20.x). Host-run bootRun
+  # cannot: the driver discovers each node's internal rpc_address via system.peers
+  # and those bridge IPs are not routable from the macOS host.
+  #
+  # Behind the `apps` profile so a bare `up -d` stays infra-only. Start with:
+  #   docker compose -f docker-compose.dev.yml up -d --build consumer
+  consumer:
+    profiles: [ "apps" ]
+    container_name: wikistream-consumer
+    image: wikistream-consumer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    networks: [ wikistream-net ]
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+      cassandra-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rpcn:
+        condition: service_healthy
+    environment:
+      # Auth / JWT
+      APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
+      APP_JWT_ISSUER: ${APP_JWT_ISSUER:-wikistream-local}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-local-jwt-secret-at-least-32-characters-long}
+      APP_JWT_ACCESS_TOKEN_TTL_SECONDS: ${APP_JWT_ACCESS_TOKEN_TTL_SECONDS:-3600}
+      # Redis + Kafka (in-network hostnames)
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Local 3-node Cassandra — reach cassandra-1 by service name on the native port
+      CASSANDRA_CONTACT_POINTS: cassandra-1
+      CASSANDRA_PORT: 9042
+      CASSANDRA_KEYSPACE_NAME: wikistream
+      CASSANDRA_LOCAL_DATACENTER: datacenter1
+      CASSANDRA_SCHEMA_ACTION: NONE
+    ports:
+      - "${CONSUMER_PORT:-7001}:7000"
+    restart: unless-stopped

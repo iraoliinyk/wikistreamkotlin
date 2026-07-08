@@ -36,7 +36,7 @@ class CoroutineBatchConsumer(
     private val metricsService: ConsumerMetricsService
 ) {
     @KafkaListener(
-        topics = [Topics.PROTO],
+        topics = ["\${app.kafka.consumer.topic:" + Topics.VALIDATED + "}"],
         containerFactory = "batchKafkaListenerContainerFactory",
         concurrency = "\${app.kafka.consumer.concurrency:4}"
     )

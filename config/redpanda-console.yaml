@@ -5,8 +5,13 @@ kafka:
   protobuf:
     enabled: true
     mappings:
-      # Canonical stream — Protobuf-encoded WikiEvent (replaces raw)
+      # Canonical stream — Protobuf-encoded WikiEvent
       - topicName: "wiki.recentchange.proto"
+        valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
+
+      # RPCN-validated stream — byte-identical protobuf pass-through of .proto
+      # (RPCN validates via decode but republishes the original bytes unchanged).
+      - topicName: "wiki.recentchange.validated"
         valueProtoType: "com.redspace.wikistreamkotlin.proto.WikiEvent"
 
       - topicName: "wiki.recentchange.dlq"

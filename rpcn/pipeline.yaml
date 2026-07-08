@@ -1,0 +1,63 @@
+http:
+  enabled: true
+  address: 0.0.0.0:4195          # /ping (liveness), /ready (readiness), /metrics
+
+input:
+  redpanda:
+    seed_brokers: [ "${RPCN_BROKERS:redpanda:9092}" ]
+    topics: [ "wiki.recentchange.proto" ]
+    consumer_group: "rpcn-validator"   # distinct from the Spring consumer's "wiki-consumer"
+    start_offset: "${RPCN_START_OFFSET:latest}"   # first deploy must NOT replay 7 days of
+    # retention (default latest); committed offsets (seeded via `rpk group seek`) always take
+    # priority — see §6. Env-overridable so integration tests can force `earliest` deterministically.
+    unordered_processing:
+      checkpoint_limit: 1024           # at-least-once: offsets commit only up to the
+      # lowest fully-delivered watermark
+
+pipeline:
+  processors:
+    - label: proto_decode
+      branch:
+        processors:
+          - protobuf:
+              operator: to_json
+              message: com.redspace.wikistreamkotlin.proto.WikiEvent
+              import_paths: [ "${RPCN_PROTO_DIR:/etc/rpcn/proto}" ]
+              discard_unknown: true    # forward-compatible: a newer producer schema
+              # must not DLQ 100% of traffic
+        # Decoded JSON is deliberately DISCARDED: the root payload stays the
+        # original protobuf bytes; decode is validation only.
+        result_map: |
+          meta validated = "true"
+
+output:
+  switch:
+    cases:
+      - check: errored()
+        output:
+          redpanda:
+            seed_brokers: [ "${RPCN_BROKERS:redpanda:9092}" ]
+            topic: "wiki.recentchange.dlq"
+            metadata:
+              include_patterns: [ '^dlq\.' ]   # ONLY DlqPublisher-compatible headers
+          processors:
+            - mapping: |
+                meta "dlq.error.message"    = error()
+                meta "dlq.error.class"      = "RpcnProtobufValidationError"
+                meta "dlq.source.topic"     = @kafka_topic
+                meta "dlq.source.partition" = @kafka_partition.string()
+                meta "dlq.source.offset"    = @kafka_offset.string()
+      - output:
+          label: validated_out
+          redpanda:
+            seed_brokers: [ "${RPCN_BROKERS:redpanda:9092}" ]
+            topic: "wiki.recentchange.validated"
+            metadata:
+              include_patterns: []     # explicit: no internal metadata leaks as headers
+
+metrics:
+  prometheus: {}                       # input_received, output_sent, output_error,
+  # processor_latency_ns (quantiles .50/.90/.99), ...
+
+logger:
+  level: INFO

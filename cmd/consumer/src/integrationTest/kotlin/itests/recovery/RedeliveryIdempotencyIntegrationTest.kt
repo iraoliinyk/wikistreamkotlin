@@ -87,10 +87,6 @@ import java.util.concurrent.atomic.AtomicInteger
  *   for set-valued projections — INSERTs on the same primary key are no-ops on
  *   the second delivery.
  *
- *   Counter-valued projections (totalMessages / botCount / nonBotCount) are
- *   intentionally NOT asserted here: Cassandra COUNTER increments are NOT
- *   idempotent under redelivery, and the production code accepts that
- *   trade-off (see TODO.md and CoroutineBatchConsumer KDoc).
  */
 @SpringBootTest(
     classes = [RedeliveryIdempotencyIntegrationTest.TestApp::class],
