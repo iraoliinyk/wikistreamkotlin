@@ -8,6 +8,7 @@ import java.time.Duration
 import java.time.Instant
 import kotlin.text.toLongOrNull
 
+@Deprecated("Use CassandraSessionRepository instead")
 @Repository
 class RedisSessionRepository(
     private val redisTemplate: RedisTemplate<String, String>,
