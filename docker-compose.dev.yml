@@ -113,12 +113,16 @@ services:
            -c cleanup.policy=delete \
            -c retention.ms=604800000 \
            -c compression.type=zstd || true
-        
-        rpk topic create wiki.recentchange.validated --brokers redpanda:9092 \
+
+        rpk topic create wiki.recentchange.validated \
+          --brokers redpanda:9092 \
           --partitions 6 --replicas 1 \
-          -c cleanup.policy=delete -c retention.ms=604800000 \
-          -c compression.type=zstd -c min.insync.replicas=1 \
-          -c message.timestamp.type=CreateTime -c max.message.bytes=524288 || true
+          -c cleanup.policy=delete \
+          -c retention.ms=604800000 \
+          -c compression.type=zstd \
+          -c min.insync.replicas=1 \
+          -c message.timestamp.type=CreateTime \
+          -c max.message.bytes=524288 || true
     restart: "no"
 
   # ── Cassandra 3-node cluster (production-equivalent, RF=3, LOCAL_QUORUM) ─────
@@ -203,20 +207,6 @@ services:
     entrypoint: [ "/bin/sh", "-c", "cqlsh cassandra-1 9042 -f /schema.cql" ]
     restart: "no"
 
-  # ── Redis (required for session storage) ───────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: wikistream-redis
-    networks: [ wikistream-net ]
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 2s
-      retries: 5
-    restart: unless-stopped
-
   # ── Redpanda Console (UI for monitoring) ───────────────────────────────────
   # Using v2.8.1 which supports file-based protobuf deserialization + BigInt fix
   redpanda-console:
@@ -247,7 +237,7 @@ services:
       - ./rpcn/pipeline.yaml:/etc/rpcn/pipeline.yaml:ro
       - ./lib/core/src/main/proto:/etc/rpcn/proto:ro
     environment:
-      RPCN_BROKERS: redpanda:9092
+      REDPANDA_BROKERS: redpanda:9092
     ports: [ "4195:4195" ]
     healthcheck:
       test: [ "CMD", "wget", "-q", "--spider", "http://localhost:4195/ready" ]

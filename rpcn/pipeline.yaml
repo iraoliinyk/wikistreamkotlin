@@ -2,62 +2,106 @@ http:
   enabled: true
   address: 0.0.0.0:4195          # /ping (liveness), /ready (readiness), /metrics
 
+# Redpanda Connect: decode + validate wiki.recentchange.proto → validated/DLQ.
+# Stateless only — sessions, aggregation, and Cassandra stay in the Spring consumer.
 input:
   redpanda:
-    seed_brokers: [ "${RPCN_BROKERS:redpanda:9092}" ]
+    seed_brokers: [ "${REDPANDA_BROKERS:redpanda:9092}" ]
     topics: [ "wiki.recentchange.proto" ]
-    consumer_group: "rpcn-validator"   # distinct from the Spring consumer's "wiki-consumer"
-    start_offset: "${RPCN_START_OFFSET:latest}"   # first deploy must NOT replay 7 days of
-    # retention (default latest); committed offsets (seeded via `rpk group seek`) always take
-    # priority — see §6. Env-overridable so integration tests can force `earliest` deterministically.
+    consumer_group: "rpcn-validator"        # isolated from "wiki-consumer"
+    # checkpoint_limit moved under unordered_processing in connect 4.x. Bounds
+    # in-flight (checkpointed-but-uncommitted) records to cap the at-least-once
+    # double-count window described in NO_REDIS.md §2.2.
     unordered_processing:
-      checkpoint_limit: 1024           # at-least-once: offsets commit only up to the
-      # lowest fully-delivered watermark
+      enabled: true
+      checkpoint_limit: 1024
 
 pipeline:
   processors:
-    - label: proto_decode
-      branch:
-        processors:
-          - protobuf:
-              operator: to_json
-              message: com.redspace.wikistreamkotlin.proto.WikiEvent
-              import_paths: [ "${RPCN_PROTO_DIR:/etc/rpcn/proto}" ]
-              discard_unknown: true    # forward-compatible: a newer producer schema
-              # must not DLQ 100% of traffic
-        # Decoded JSON is deliberately DISCARDED: the root payload stays the
-        # original protobuf bytes; decode is validation only.
-        result_map: |
-          meta validated = "true"
+    # Keep the original bytes so the DLQ carries the raw record, matching
+    # DlqPublisher's behavior of forwarding the original value.
+    - mapping: |
+        meta raw_payload = content()
+
+    - try:
+        - protobuf:
+            operator: to_json
+            message: com.redspace.wikistreamkotlin.proto.WikiEvent
+            import_paths: [ "/etc/rpcn/proto" ]
+
+        # Field validation. throw() marks the message failed -> catch block.
+        # NOTE: verify decoded field casing during implementation — protobuf
+        # to_json emits lowerCamelCase (serverUrl) by default.
+        - label: validate_wiki_event
+          mapping: |
+            root = this
+            # Each rule is `root = if <bad> { throw(...) }`: a false condition with
+            # no else abandons the assignment (root keeps `this`), a true condition
+            # throws and flags the message failed -> catch block. A bare `throw()`
+            # is not a valid Bloblang statement — assignments only.
+            root = if this.user.or("").trim() == "" {
+              throw("validation: user must be non-empty")
+            }
+            root = if this.title.or("").trim() == "" {
+              throw("validation: title must be non-empty")
+            }
+            root = if !this.serverUrl.or("").re_match("^https?://[A-Za-z0-9.-]+") {
+              throw("validation: server_url malformed: " + this.serverUrl.or("<missing>"))
+            }
+            # timestamp is unix seconds; reject pre-2001 (Wikipedia epoch) or >5min future
+            let ts = this.timestamp.or(0).number()
+            root = if $ts < 978307200 || $ts > (now().ts_unix() + 300) {
+              throw("validation: timestamp out of range: " + $ts.string())
+            }
+
+        # Consumer still deserializes protobuf (ProtoWikiEventDeserializer),
+        # so re-encode before republishing.
+        - protobuf:
+            operator: from_json
+            message: com.redspace.wikistreamkotlin.proto.WikiEvent
+            import_paths: [ "/etc/rpcn/proto" ]
+        - mapping: |
+            meta rpcn_valid = "true"
+
+    - catch:
+        # Reuse DlqPublisher's exact header contract so DLQ tooling is
+        # producer-agnostic: dlq.error.message / dlq.error.class /
+        # dlq.source.{topic,partition,offset}.
+        - mapping: |
+            root = meta("raw_payload")
+            meta rpcn_valid             = "false"
+            meta "dlq.error.message"    = error()
+            meta "dlq.error.class"      = "RpcnValidationError"
+            meta "dlq.source.topic"     = meta("kafka_topic")
+            meta "dlq.source.partition" = meta("kafka_partition")
+            meta "dlq.source.offset"    = meta("kafka_offset")
 
 output:
   switch:
     cases:
-      - check: errored()
+      - check: 'meta("rpcn_valid") == "true"'
         output:
           redpanda:
-            seed_brokers: [ "${RPCN_BROKERS:redpanda:9092}" ]
-            topic: "wiki.recentchange.dlq"
-            metadata:
-              include_patterns: [ '^dlq\.' ]   # ONLY DlqPublisher-compatible headers
-          processors:
-            - mapping: |
-                meta "dlq.error.message"    = error()
-                meta "dlq.error.class"      = "RpcnProtobufValidationError"
-                meta "dlq.source.topic"     = @kafka_topic
-                meta "dlq.source.partition" = @kafka_partition.string()
-                meta "dlq.source.offset"    = @kafka_offset.string()
-      - output:
-          label: validated_out
-          redpanda:
-            seed_brokers: [ "${RPCN_BROKERS:redpanda:9092}" ]
+            seed_brokers: [ "${REDPANDA_BROKERS:redpanda:9092}" ]
             topic: "wiki.recentchange.validated"
+            key: '${! meta("kafka_key") }'
             metadata:
-              include_patterns: []     # explicit: no internal metadata leaks as headers
+              include_patterns: []            # clean stream: no internal headers
+            batching:                         # produce-side batching only;
+              count: 200                      # the Spring batch listener still
+              period: 100ms                   # owns consume-side batching
+              byte_size: 1048576
+      - output:
+          redpanda:
+            seed_brokers: [ "${REDPANDA_BROKERS:redpanda:9092}" ]
+            topic: "wiki.recentchange.dlq"
+            key: '${! meta("kafka_key") }'
+            metadata:
+              include_patterns: [ "^dlq\\." ] # only the 5 contract headers
 
 metrics:
-  prometheus: {}                       # input_received, output_sent, output_error,
-  # processor_latency_ns (quantiles .50/.90/.99), ...
+  prometheus:
+    add_process_metrics: true
 
 logger:
   level: INFO
