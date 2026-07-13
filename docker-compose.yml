@@ -102,20 +102,6 @@ services:
           -c message.timestamp.type=CreateTime -c max.message.bytes=524288 || true
     restart: "no"
 
-  # ── Redis ──────────────────────────────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: wikistream-redis
-    networks: [ wikistream-net ]
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 2s
-      retries: 5
-    restart: unless-stopped
-
   # ── Redpanda Console (UI for monitoring) ───────────────────────────────────
   # Using v2.8.1 which supports file-based protobuf deserialization + BigInt fix
   redpanda-console:
@@ -166,16 +152,12 @@ services:
     depends_on:
       redpanda-init:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
       rpcn:
         condition: service_healthy
     volumes:
       - ./config:/app/config:ro
     environment:
       APP_AUTH_ENABLED: ${APP_AUTH_ENABLED:-true}
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     ports:
       - "${CONSUMER_PORT:-7001}:7000"

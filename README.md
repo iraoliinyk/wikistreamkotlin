@@ -60,7 +60,6 @@ wikistreamkotlin/
 │               │   ├── DlqKafkaConfig.kt                # DLQ producer (ByteArray, acks=all)
 │               │   ├── KafkaErrorHandlerConfig.kt       # DefaultErrorHandler → DLQ (framework-level)
 │               │   ├── GracefulShutdownHandler.kt       # drain listener containers on shutdown
-│               │   ├── RedisConfig.kt                   # Lettuce connection + RedisTemplate
 │               │   ├── CassandraConfig.kt               # ReactiveCassandraTemplate wiring
 │               │   ├── AstraDbConfig.kt                 # CqlSession customizer for Astra
 │               │   ├── AstraDbProperties.kt
@@ -77,7 +76,6 @@ wikistreamkotlin/
 │               │   └── RevokedToken.kt
 │               ├── repository/
 │               │   ├── SessionRepository.kt                # Interface
-│               │   ├── RedisSessionRepository.kt           # Redis-backed session storage
 │               │   ├── UserAccountCassandraRepository.kt   # Spring Data
 │               │   ├── StatsReadRepository.kt              # Read interface (ISP split)
 │               │   ├── StatsWriteRepository.kt             # Write interface (ISP split)
@@ -156,7 +154,6 @@ wikistreamkotlin/
 | Spring WebFlux | (Boot-managed) | Reactive HTTP server (Netty) |
 | Spring Kafka | 4.0.4 | Kafka protocol layer for Redpanda |
 | Spring Data Cassandra | (Boot-managed) | Cassandra ORM + repositories |
-| Spring Data Redis | (Boot-managed) | Redis session storage (Lettuce) |
 | Spring Security | (Boot-managed) | Auth filter chain |
 | Spring Security OAuth2 Resource Server + Jose | (Boot-managed) | JWT decode & validation |
 | Kotlinx Coroutines + Reactor bridge | (Boot-managed) | Coroutine ↔ Reactor interop |
@@ -281,11 +278,10 @@ docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
 > **Note:** DLQ messages use Redpanda default retention (~7 days). Monitor DLQ depth — a spike indicates a systemic issue (e.g., Cassandra down, schema mismatch).
 
 ### Storage
-| Store | Version | Usage |
-|-------|---------|-------|
-| Apache Cassandra | 5.0 | User accounts, stats counters (COUNTER + append-only tables), revoked tokens |
-| Redis | 7 | Active session tracking (login/logout state + TTL) |
-| DataStax Astra | cloud | Managed Cassandra (optional Astra profile) |
+| Store | Version | Usage                                                                                                                            |
+|-------|---------|----------------------------------------------------------------------------------------------------------------------------------|
+| Apache Cassandra | 5.0 | User accounts, stats counters (COUNTER + append-only tables), revoked tokens, active session tracking (login/logout state + TTL) |
+| DataStax Astra | cloud | Managed Cassandra (optional Astra profile)                                                                                       |
 
 ### Auth
 | Mechanism | Details |
@@ -293,7 +289,7 @@ docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
 | JWT (HS256) | Signed with app secret, TTL-based expiry |
 | Bearer scheme | `Authorization: Bearer <token>` on protected routes |
 | Token revocation | `revoked_tokens` Cassandra table + `jti` lookup on every request |
-| Session state | Redis hash per email, TTL mirrors JWT expiry |
+| Session state | Cassandra table `active_sessions` keyed by email, TTL mirrors JWT expiry |
 
 ### Code Quality
 | Tool | Version | Role |
@@ -308,7 +304,7 @@ docker exec wikistream-redpanda rpk topic consume wiki.recentchange.dlq \
 | JUnit 5 | (Boot-managed) | Test runner |
 | Mockito-Kotlin | 5.4.0 | Mocking |
 | Spring Boot Test | (Boot-managed) | Context loading + test slices |
-| Testcontainers | 2.0.4 | Real Cassandra + Redis in integration tests |
+| Testcontainers | 2.0.4 | Real Cassandra in integration tests |
 | Reactor Test | (Boot-managed) | Reactive stream assertions |
 
 ---
@@ -335,7 +331,7 @@ Wikimedia SSE → producer → wiki.recentchange.proto (6 partitions)
                                    │
                                    ▼
                   Spring Boot consumer  (reads wiki.recentchange.validated)
-                     ├─ Redis: enumerate currently-active users
+                     ├─ Cassandra: enumerate currently-active users
                      ├─ BatchAggregationService → one delta per batch
                      ├─ per-user Cassandra writes (COUNTER + idempotent INSERT)
                      ├─ write failures → wiki.recentchange.dlq (DlqPublisher)
@@ -432,17 +428,7 @@ app.security.jwt.access-token-ttl-seconds=3600
 
 **`config/cassandra-secrets.properties`** — only needed for the Astra profile (leave blank for local Cassandra).
 
-### 3. Choose session backend
-
-Edit `.env` (repository root):
-
-```dotenv
-# Redis is required for session storage
-SPRING_DATA_REDIS_HOST=localhost
-SPRING_DATA_REDIS_PORT=6379
-```
-
-### 4. Build all modules
+### 3. Build all modules
 
 ```bash
 ./gradlew build -x test
@@ -455,7 +441,7 @@ The root project is an aggregator for shared build/lint tasks. Runnable Spring B
 ./gradlew :cmd:consumer:bootJar
 ```
 
-### 5. Run unit tests
+### 4. Run unit tests
 
 ```bash
 ./gradlew :cmd:producer:test :cmd:consumer:test :lib:core:test
@@ -480,7 +466,6 @@ All service ports for local development and Docker deployment:
 | **Redpanda (Kafka)** | `19092` | `9092` (internal)<br>`19092` (external) | `19092` | External port for local apps |
 | **Redpanda Console** | `8080` | `8080` | `8080` | Web UI for Kafka topics |
 | **Cassandra (dev only)** | `19042` | `9042` (each of `cassandra-1/2/3`) | `19042` (cassandra-1 only) | Dev: 3-node cluster on `wikistream-net`; only node-1 published. Prod uses Astra — no container. |
-| **Redis** | `6379` | `6379` | `6379` | Required in both stacks |
 | **Prometheus** | `9090` | `9090` | `9090` | Monitoring (when enabled) |
 | **Grafana** | `3000` | `3000` | `3000` | Dashboards (when enabled) |
 
@@ -488,7 +473,7 @@ All service ports for local development and Docker deployment:
 - **Local development:** Consumer runs on `7000`, Producer on `7002`
 - **Docker stack:** Consumer container internal `7000`, host `7001` (configurable)
 - Redpanda uses `9092` for internal Docker network, `19092` for external/host access
-- All infrastructure ports are standard (Cassandra `9042`→`19042`, Redis `6379`, etc.)
+- All infrastructure ports are standard (Cassandra `9042`→`19042`, etc.)
 
 ---
 
@@ -509,7 +494,7 @@ The Cassandra topology mirrors the production Astra layout — `NetworkTopologyS
 ```bash
 cd /Users/ioliinyk/Desktop/kotlinProjects/wikistreamkotlin
 
-# Start infrastructure: Redpanda + topics, 3-node Cassandra + schema, Redis, Console
+# Start infrastructure: Redpanda + topics, 3-node Cassandra + schema, Console
 docker compose -f docker-compose.dev.yml up -d
 
 # With monitoring (Prometheus + Grafana)
@@ -522,7 +507,6 @@ First boot takes ~2–3 minutes — `cassandra-1` → `cassandra-2` → `cassand
 - `redpanda` on `localhost:19092` (Kafka-compatible broker) — topics created by `redpanda-init`
 - `cassandra-1` on `localhost:19042` (only one node is host-published; the cluster has 3 nodes internally)
 - `cassandra-init` (one-shot) applies `cmd/consumer/src/main/resources/db/cassandra/schema.cql` once all 3 nodes are `UN`
-- `redis` on `localhost:6379` (session storage — required)
 - `redpanda-console` on `localhost:8080` (Kafka topic browser)
 
 **Optional profiles:**
@@ -538,7 +522,7 @@ docker exec wikistream-cassandra-1 nodetool status | grep '^UN' | wc -l   # → 
 docker logs wikistream-cassandra-init --tail=20
 ```
 
-> **Astra alternative.** To point dev at DataStax Astra instead of the local cluster, skip the Cassandra containers (`docker compose -f docker-compose.dev.yml up -d redpanda redpanda-init redis redpanda-console`) and follow Option B's Astra setup. The app will activate the `astra` profile and ignore `spring.cassandra.contact-points`.
+> **Astra alternative.** To point dev at DataStax Astra instead of the local cluster, skip the Cassandra containers (`docker compose -f docker-compose.dev.yml up -d redpanda redpanda-init redpanda-console`) and follow Option B's Astra setup. The app will activate the `astra` profile and ignore `spring.cassandra.contact-points`.
 
 ---
 
@@ -553,8 +537,6 @@ APP_JWT_ISSUER=wikistream-local \
 APP_JWT_SECRET=local-jwt-secret-at-least-32-characters-long \
 APP_JWT_ACCESS_TOKEN_TTL_SECONDS=3600 \
 APP_AUTH_ENABLED=true \
-SPRING_DATA_REDIS_HOST=localhost \
-SPRING_DATA_REDIS_PORT=6379 \
 SERVER_PORT=7001 \
 SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092 \
 CASSANDRA_CONTACT_POINTS=127.0.0.1 \
@@ -652,7 +634,7 @@ docker compose -f docker-compose.dev.yml --profile monitoring down -v --remove-o
 
 ### Option B — Full Docker Stack (Production-like, Astra-backed)
 
-All app services containerized — Redpanda, Redis, Consumer, Producer — on the shared `wikistream-net`. The datastore is **DataStax Astra** (managed cloud Cassandra), not a local Cassandra cluster: the production stack is intentionally stateless on the local machine so `docker compose down -v` can never destroy user data, and so the runtime topology matches a real multi-region Cassandra deployment.
+All app services containerized — Redpanda, Consumer, Producer — on the shared `wikistream-net`. The datastore is **DataStax Astra** (managed cloud Cassandra), not a local Cassandra cluster: the production stack is intentionally stateless on the local machine so `docker compose down -v` can never destroy user data, and so the runtime topology matches a real multi-region Cassandra deployment.
 
 **1) Prepare Astra credentials (first time only):**
 
@@ -911,7 +893,7 @@ config/
 ## Kubernetes Deployment (Minikube)
 
 Deploys the full stack to a local Minikube cluster in dependency order: cluster +
-namespace + locally-built images → stateful deps (Redpanda, Redis, 3-node Cassandra)
+namespace + locally-built images → stateful deps (Redpanda, 3-node Cassandra)
 → monitoring (kube-prometheus-stack) → apps (producer, consumer).
 
 Manifests live in `k8s/`. The consumer/producer images are built **inside Minikube's
@@ -923,7 +905,7 @@ Docker daemon** (`imagePullPolicy: Never`), so no registry is required.
 - Docker Desktop with enough memory allocated (Settings → Resources): the script
   defaults to a **4 CPU / 12 GiB** Minikube node, and Docker's own VM must be larger
   than that. 12 GiB fits the whole stack — 3-node Cassandra (~4.5 GiB) + Redpanda +
-  Redis + kube-prometheus-stack (~2.5 GiB) + producer + 2 consumers (measured peaking
+  kube-prometheus-stack (~2.5 GiB) + producer + 2 consumers (measured peaking
   at ~9.2 GiB). A node too small **OOM-kills the Cassandra pods** — they then come back
   with new IPs, lose quorum, and every request fails with a 500 (see Troubleshooting).
   Stop the local Docker Compose dev stack first
@@ -981,7 +963,7 @@ The script is **idempotent and self-healing**:
 #    installed by the monitoring step, so it won't resolve on a bare cluster.
 kubectl apply --dry-run=client \
   -f k8s/cassandra.yaml -f k8s/redpanda.yaml -f k8s/redpanda-init-job.yaml \
-  -f k8s/redis.yaml -f k8s/producer.yaml -f k8s/consumer.yaml
+  -f k8s/producer.yaml -f k8s/consumer.yaml
 kubectl apply --dry-run=client -f k8s/servicemonitors.yaml   # only after Step 2 (monitoring)
 
 # 1. Everything is scheduled and healthy
@@ -1026,7 +1008,7 @@ minikube delete
 bash scripts/k8s-deploy.sh
 
 # B) Redeploy the app stack only — keep the cluster and the already-built images
-#    (much faster). Wipes Redpanda/Redis/Cassandra/monitoring/apps in the namespace.
+#    (much faster). Wipes Redpanda/Cassandra/monitoring/apps in the namespace.
 kubectl delete namespace wikistream
 bash scripts/k8s-deploy.sh
 ```
@@ -1094,7 +1076,7 @@ kubectl describe pod cassandra-2 | grep -iE 'OOMKilled|Last State'
 ```
 
 Cause: the Minikube node is too small for the stack. Each Cassandra pod uses ~1.3–1.8
-GiB and there are three of them, plus Redpanda/Redis — a 6 GiB node can't hold it. The
+GiB and there are three of them, plus Redpanda — a 6 GiB node can't hold it. The
 subtlety is that the kubelet reports the **whole Docker VM** (e.g. 16 GiB) as node
 capacity, so the scheduler places all three pods; they then blow past the Minikube
 container's real cgroup limit and the kernel OOM-kills a Cassandra JVM.
@@ -1172,8 +1154,6 @@ is missing tables or lost quorum.
 | Variable | Default | Where | Notes |
 |----------|---------|-------|-------|
 | `APP_AUTH_ENABLED` | `true` | Both | Enable `/v1/auth/*` endpoints |
-| `SPRING_DATA_REDIS_HOST` | `localhost` | Both | Redis host (set to `redis` in Docker) |
-| `SPRING_DATA_REDIS_PORT` | `6379` | Both | Redis port |
 | `CONSUMER_PORT` | `7001` | Full stack only | Host port for consumer (container always 7000) |
 | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | Dev only | Redpanda broker endpoint |
 | `CASSANDRA_CONTACT_POINTS` | `127.0.0.1` | Dev only | Cassandra host |
@@ -1394,8 +1374,6 @@ curl http://localhost:7000/v1/stats \
 | `spring.cassandra.port` | `9042` | `CASSANDRA_PORT` | Docker maps container 9042 → host 19042 |
 | `spring.cassandra.keyspace-name` | `wikistream` | `CASSANDRA_KEYSPACE_NAME` | Keyspace name |
 | `spring.cassandra.local-datacenter` | `datacenter1` | `CASSANDRA_LOCAL_DATACENTER` | Required for driver |
-| `spring.data.redis.host` | `localhost` | `SPRING_DATA_REDIS_HOST` | Redis host (set to `redis` in Docker) |
-| `spring.data.redis.port` | `6379` | `SPRING_DATA_REDIS_PORT` | Redis port (required for session storage) |
 | `server.port` | `7000` | `SERVER_PORT` | HTTP server port |
 | `app.auth.enabled` | `true` | `APP_AUTH_ENABLED` | Enable/disable auth endpoints |
 | `app.security.jwt.issuer` | _(required)_ | `APP_JWT_ISSUER` | JWT issuer claim |
@@ -1449,14 +1427,14 @@ Or all at once via the root aggregator:
 
 ### Integration tests (Docker required)
 
-Integration tests spin up real Cassandra, Redis, and Redpanda containers via Testcontainers — no `docker compose up` needed beforehand.
+Integration tests spin up real Cassandra and Redpanda containers via Testcontainers — no `docker compose up` needed beforehand.
 
 **Consumer Integration Tests:**
 ```bash
 ./gradlew :cmd:consumer:integrationTest
 ```
 
-Tests real Cassandra repositories, Redis sessions, and AuthService with actual containers.
+Tests real Cassandra repositories and AuthService with actual containers.
 
 **Producer Integration Tests:**
 ```bash
@@ -1482,7 +1460,7 @@ Tests the complete producer pipeline:
 | `cmd:producer:test` | 12 | Parser, publisher, SSE client, configuration, ingestion runner, metrics service |
 | `cmd:producer:integrationTest` | 1 | End-to-end producer pipeline with real Redpanda (Testcontainers) |
 | `cmd:consumer:test` | 45 | Batch consumer (proto topic), services, security, auth, error handling |
-| `cmd:consumer:integrationTest` | 28 | Cassandra repos, Redis sessions, AuthService (with real containers) |
+| `cmd:consumer:integrationTest` | 28 | Cassandra repos, AuthService (with real containers) |
 | **Total** | **92** | Comprehensive coverage: protobuf serialization, Redpanda topics, DLQ, JWT auth, session management, metrics |
 
 ### Test Structure
@@ -1490,12 +1468,12 @@ Tests the complete producer pipeline:
 **Unit Tests:**
 - Fast execution (< 30 seconds total)
 - No external dependencies
-- Mocked Kafka, Cassandra, Redis
+- Mocked Kafka, Cassandra
 - Focus: business logic, parsing, serialization
 
 **Integration Tests:**
 - Slower execution (Testcontainers startup overhead)
-- Real external services (Cassandra, Redis, Redpanda)
+- Real external services (Cassandra, Redpanda)
 - Focus: end-to-end flows, data persistence, message publishing
 
 ### Running Tests in CI

@@ -24,8 +24,6 @@ import java.util.concurrent.atomic.AtomicReference
  * the same table, so the cache introduces at most cache-ttl of cross-instance
  * staleness while remaining multi-instance-correct.
  */
-@Primary // transition only — remove when RedisSessionRepository is deleted
-
 @Repository
 class CassandraSessionRepository(
     private val cqlSession: CqlSession,
