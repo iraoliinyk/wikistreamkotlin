@@ -29,7 +29,19 @@ pipeline:
             message: com.redspace.wikistreamkotlin.proto.WikiEvent
             import_paths: [ "/etc/rpcn/proto" ]
 
-        # Field validation. throw() marks the message failed -> catch block.
+        # Why we validate here:
+        # This is a quality gate. Every event that reaches wiki.recentchange.validated
+        # must be a valid WikiEvent, so the consumer can trust it and does not need to
+        # check the fields again.
+        #  - The consumer writes per-user stats into Cassandra COUNTER columns. Counters
+        #    cannot be undone, so bad data (for example an empty user) would create junk
+        #    rows that are hard to fix later. We stop such events before they are counted.
+        #  - Bad events could also make the consumer fail while reading a batch. Rejecting
+        #    them here keeps the consumer simple and stable.
+        #  - Rejected events are not lost: they go to the DLQ with error headers, so we can
+        #    see what was wrong and replay them later.
+        # A failed rule calls throw(), which marks the message failed and sends it to the
+        # catch block below.
         # NOTE: verify decoded field casing during implementation — protobuf
         # to_json emits lowerCamelCase (serverUrl) by default.
         - label: validate_wiki_event
