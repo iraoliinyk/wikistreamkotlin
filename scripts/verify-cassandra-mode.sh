@@ -214,9 +214,9 @@ verify_local_cassandra_mode() {
     fi
 
     # Check that Redpanda topics were created
-    local raw_topic=$(docker-compose -f "$COMPOSE_FILE" exec -T redpanda rpk topic list 2>/dev/null | grep -c "wiki.recentchange.raw" || true)
-    if [[ $raw_topic -gt 0 ]]; then
-        log_success "Kafka topics created: wiki.recentchange.raw, wiki.recentchange.dlq"
+    local proto_topic=$(docker-compose -f "$COMPOSE_FILE" exec -T redpanda rpk topic list 2>/dev/null | grep -c "wiki.recentchange.proto" || true)
+    if [[ $proto_topic -gt 0 ]]; then
+        log_success "Kafka topics created: wiki.recentchange.proto, wiki.recentchange.dlq"
     else
         log_error "Kafka topics not found"
         return 1

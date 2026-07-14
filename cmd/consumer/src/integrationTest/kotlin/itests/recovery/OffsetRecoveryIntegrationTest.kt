@@ -61,11 +61,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     7. Assert: the new listener instance sees the SAME records (by key) AND
  *        the committed offset now equals the topic end offset.
  *
- * Why this is a meaningful test of the production architecture
- *   The blind-write strategy in TODO.md relies entirely on Kafka redelivery for
- *   crash recovery. There is no batch-state table. This test pins down that
- *   contract: uncommitted offsets ⇒ redelivery, committed offsets ⇒ no
- *   redelivery.
  */
 @SpringBootTest(
     classes = [OffsetRecoveryIntegrationTest.TestApp::class],

@@ -1,0 +1,26 @@
+tests:
+  - name: valid protobuf passes through byte-identical, flagged validated
+    target_processors: '/pipeline/processors'
+    environment:
+      RPCN_PROTO_DIR: "lib/core/src/main/proto"   # relative to repo root (rpk's CWD)
+    input_batch:
+      - file_content: ./fixtures/valid-wikievent.bin   # raw WikiEvent bytes, checked in
+        metadata:
+          kafka_topic: wiki.recentchange.proto
+          kafka_partition: 0
+          kafka_offset: 42
+    output_batches:
+      - - file_equals: ./fixtures/valid-wikievent.bin  # payload NOT re-serialized
+          metadata_equals:
+            validated: "true"
+          bloblang: '!errored()'
+
+  - name: garbage bytes are marked errored with payload untouched
+    target_processors: '/pipeline/processors'
+    environment:
+      RPCN_PROTO_DIR: "lib/core/src/main/proto"   # relative to repo root (rpk's CWD)
+    input_batch:
+      - content: 'this is not protobuf'
+    output_batches:
+      - - content_equals: 'this is not protobuf'
+          bloblang: 'errored()'
